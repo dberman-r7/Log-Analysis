@@ -1,0 +1,174 @@
+name: Validate Governance Framework
+
+on:
+  push:
+    branches: [ main, copilot/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-structure:
+    name: Validate Repository Structure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Validate required files exist
+        run: |
+          echo "::group::Checking Required Files"
+          
+          REQUIRED_FILES=(
+            ".github/copilot-instructions.md"
+            ".github/pull_request_template.md"
+            "docs/requirements/rtm.md"
+            "docs/requirements/slos.md"
+            "docs/arch/adr-template.md"
+            "docs/processes/change-management.md"
+            "docs/processes/definition-of-done.md"
+            "docs/processes/tech-debt.md"
+            "docs/processes/QUICKSTART.md"
+            "docs/processes/templates/cr-template.md"
+            "docs/README.md"
+            "README.md"
+          )
+          
+          MISSING=0
+          
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✅ $file exists"
+            else
+              echo "❌ MISSING: $file"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          
+          if [ $MISSING -gt 0 ]; then
+            echo ""
+            echo "::error::$MISSING required file(s) missing"
+            exit 1
+          else
+            echo ""
+            echo "✅ All required governance files are present"
+          fi
+          
+          echo "::endgroup::"
+      
+      - name: Validate required directories exist
+        run: |
+          echo "::group::Checking Required Directories"
+          
+          REQUIRED_DIRS=(
+            "docs/requirements"
+            "docs/arch"
+            "docs/arch/adr"
+            "docs/arch/diagrams"
+            "docs/processes"
+            "docs/processes/templates"
+            "docs/processes/change-requests"
+            "docs/processes/exemptions"
+            "docs/runbooks"
+            ".github/workflows"
+          )
+          
+          MISSING=0
+          
+          for dir in "${REQUIRED_DIRS[@]}"; do
+            if [ -d "$dir" ]; then
+              echo "✅ $dir exists"
+            else
+              echo "❌ MISSING: $dir"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          
+          if [ $MISSING -gt 0 ]; then
+            echo ""
+            echo "::error::$MISSING required director(ies) missing"
+            exit 1
+          else
+            echo ""
+            echo "✅ All required directories are present"
+          fi
+          
+          echo "::endgroup::"
+      
+      - name: Validate governance instructions format
+        run: |
+          echo "::group::Validating Copilot Instructions"
+          
+          if [ -f ".github/copilot-instructions.md" ]; then
+            # Check for required sections
+            REQUIRED_SECTIONS=(
+              "The Governance Framework"
+              "Requirement Engineering"
+              "Architecture-as-Code"
+              "TDD & Quality"
+              "Observability"
+              "Git Flow"
+              "Security"
+            )
+            
+            MISSING_SECTIONS=0
+            
+            for section in "${REQUIRED_SECTIONS[@]}"; do
+              if grep -qi "$section" .github/copilot-instructions.md; then
+                echo "✅ Section found: $section"
+              else
+                echo "⚠️ Section missing or not found: $section"
+                MISSING_SECTIONS=$((MISSING_SECTIONS + 1))
+              fi
+            done
+            
+            if [ $MISSING_SECTIONS -gt 0 ]; then
+              echo ""
+              echo "::warning::Some sections may be missing from copilot-instructions.md"
+            else
+              echo ""
+              echo "✅ All required sections are present"
+            fi
+          else
+            echo "::error::copilot-instructions.md not found"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+      
+      - name: Generate governance report
+        if: always()
+        run: |
+          echo "::group::Governance Framework Report"
+          echo ""
+          echo "╔═══════════════════════════════════════════════════════════╗"
+          echo "║      Governance Framework Validation Summary             ║"
+          echo "╚═══════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "Framework Version: 1.0.0"
+          echo "Validation Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          echo ""
+          
+          # Count files
+          MARKDOWN_FILES=$(find . -name "*.md" ! -path "./.git/*" | wc -l)
+          WORKFLOW_FILES=$(find .github/workflows -name "*.yml" 2>/dev/null | wc -l || echo 0)
+          
+          echo "📊 Statistics:"
+          echo "  - Markdown files: $MARKDOWN_FILES"
+          echo "  - Workflow files: $WORKFLOW_FILES"
+          echo "  - Total governance docs: $(du -sh docs 2>/dev/null | cut -f1 || echo 'N/A')"
+          echo ""
+          
+          echo "📁 Directory Structure:"
+          tree -L 2 -d docs 2>/dev/null || find docs -type d | head -20
+          echo ""
+          
+          echo "✅ Governance framework is properly configured"
+          echo ""
+          echo "For more information, see:"
+          echo "  📖 .github/copilot-instructions.md"
+          echo "  📖 GOVERNANCE_SUMMARY.md"
+          echo "  📖 docs/processes/QUICKSTART.md"
+          echo ""
+          echo "╚═══════════════════════════════════════════════════════════╝"
+          echo "::endgroup::"
