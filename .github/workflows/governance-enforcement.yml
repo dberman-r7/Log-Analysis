@@ -1,0 +1,311 @@
+name: Governance Enforcement
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  enforce-governance:
+    name: Enforce Repository Governance
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comparison
+      
+      - name: Get changed files
+        id: changed-files
+        run: |
+          # Get list of changed files
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...${{ github.sha }})
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          # Check if src/ directory was modified
+          if echo "$CHANGED_FILES" | grep -q "^src/"; then
+            echo "src_changed=true" >> $GITHUB_OUTPUT
+            echo "Source code was modified"
+          else
+            echo "src_changed=false" >> $GITHUB_OUTPUT
+            echo "Source code was not modified"
+          fi
+          
+          # Check if architectural components changed (deeper check)
+          if echo "$CHANGED_FILES" | grep -E "^src/.*(service|controller|repository|model|api|handler|middleware|database|cache)"; then
+            echo "arch_changed=true" >> $GITHUB_OUTPUT
+            echo "Architectural components were modified"
+          else
+            echo "arch_changed=false" >> $GITHUB_OUTPUT
+            echo "Architectural components were not modified"
+          fi
+          
+          # Save changed files for other steps
+          echo "$CHANGED_FILES" > /tmp/changed_files.txt
+      
+      - name: Check RTM Update
+        if: steps.changed-files.outputs.src_changed == 'true'
+        run: |
+          echo "::group::RTM Validation"
+          CHANGED_FILES=$(cat /tmp/changed_files.txt)
+          
+          if echo "$CHANGED_FILES" | grep -q "docs/requirements/rtm.md"; then
+            echo "✅ RTM was updated"
+            echo "::notice::RTM update detected for source code changes"
+          else
+            echo "❌ ERROR: Source code changed but RTM not updated"
+            echo "::error::RTM (docs/requirements/rtm.md) must be updated when source code changes"
+            echo ""
+            echo "Please update the Requirement Traceability Matrix (RTM) to reflect:"
+            echo "  - New requirements (REQ-IDs)"
+            echo "  - Updated implementation details"
+            echo "  - Test coverage information"
+            echo "  - Links to modified files"
+            echo ""
+            echo "See: /docs/requirements/rtm.md"
+            exit 1
+          fi
+          echo "::endgroup::"
+      
+      - name: Check ADR for Architectural Changes
+        if: steps.changed-files.outputs.arch_changed == 'true'
+        run: |
+          echo "::group::ADR Validation"
+          CHANGED_FILES=$(cat /tmp/changed_files.txt)
+          
+          # Check if any ADR files were added or modified
+          if echo "$CHANGED_FILES" | grep -q "docs/arch/adr/"; then
+            echo "✅ ADR was created or updated"
+            echo "::notice::ADR update detected for architectural changes"
+          else
+            echo "⚠️ WARNING: Architectural components changed but no ADR found"
+            echo "::warning::Consider creating an ADR if this change represents a significant architectural decision"
+            echo ""
+            echo "Architectural Decision Records (ADRs) should be created for:"
+            echo "  - New technology or framework choices"
+            echo "  - Changes to system structure"
+            echo "  - New patterns or approaches"
+            echo "  - Decisions with long-term impact"
+            echo ""
+            echo "If this change is minor or follows existing patterns, you may ignore this warning."
+            echo "Otherwise, please create an ADR in: /docs/arch/adr/NNNN-title.md"
+            echo ""
+            echo "See ADR template: /docs/arch/adr-template.md"
+            # Don't fail, just warn
+          fi
+          echo "::endgroup::"
+      
+      - name: Check Documentation Updates
+        run: |
+          echo "::group::Documentation Validation"
+          CHANGED_FILES=$(cat /tmp/changed_files.txt)
+          
+          # If code changed, check if any documentation was updated
+          if echo "$CHANGED_FILES" | grep -q "^src/"; then
+            if echo "$CHANGED_FILES" | grep -qE "^(docs/|README.md|CHANGELOG.md)"; then
+              echo "✅ Documentation was updated along with code"
+            else
+              echo "⚠️ WARNING: Code changed but no documentation updates detected"
+              echo "::warning::Consider updating documentation if this change affects users or developers"
+              # Don't fail, just warn
+            fi
+          fi
+          echo "::endgroup::"
+      
+      - name: Validate RTM Format
+        if: steps.changed-files.outputs.src_changed == 'true'
+        run: |
+          echo "::group::RTM Format Validation"
+          
+          if [ -f "docs/requirements/rtm.md" ]; then
+            echo "Checking RTM format..."
+            
+            # Check for required sections
+            if ! grep -q "## Requirements Matrix" docs/requirements/rtm.md; then
+              echo "::error::RTM is missing '## Requirements Matrix' section"
+              exit 1
+            fi
+            
+            # Check for REQ-ID format (basic validation)
+            if ! grep -qE "REQ-[0-9]{3}" docs/requirements/rtm.md; then
+              echo "⚠️ WARNING: No REQ-IDs found in RTM (format: REQ-NNN)"
+              echo "::warning::RTM should contain at least one requirement with format REQ-NNN"
+            fi
+            
+            echo "✅ RTM format appears valid"
+          else
+            echo "❌ ERROR: RTM file not found at docs/requirements/rtm.md"
+            echo "::error::RTM file must exist at docs/requirements/rtm.md"
+            exit 1
+          fi
+          echo "::endgroup::"
+      
+      - name: Check PR Title Format
+        run: |
+          echo "::group::PR Title Validation"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "PR Title: $PR_TITLE"
+          
+          # Check if PR title contains CR-ID format
+          if echo "$PR_TITLE" | grep -qE "\[CR-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{3}\]"; then
+            echo "✅ PR title contains CR-ID"
+          else
+            echo "⚠️ WARNING: PR title doesn't contain CR-ID"
+            echo "::warning::PR title should include CR-ID in format: [CR-YYYY-MM-DD-XXX] Description"
+            echo "Example: [CR-2026-02-09-001] Add log parsing feature"
+            # Don't fail, just warn
+          fi
+          echo "::endgroup::"
+      
+      - name: Check for Breaking Changes Notice
+        run: |
+          echo "::group::Breaking Changes Check"
+          PR_BODY="${{ github.event.pull_request.body }}"
+          
+          # Check if PR body mentions breaking changes
+          if echo "$PR_BODY" | grep -iq "breaking.*change"; then
+            echo "⚠️ NOTICE: PR mentions breaking changes"
+            echo "::warning::This PR contains breaking changes - ensure migration guide is included"
+          fi
+          echo "::endgroup::"
+      
+      - name: Governance Summary
+        if: always()
+        run: |
+          echo "::group::Governance Check Summary"
+          echo ""
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║          Governance Enforcement Summary                   ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "This workflow enforces the governance framework defined in:"
+          echo "  📋 /.github/copilot-instructions.md"
+          echo ""
+          echo "Key governance rules:"
+          echo "  ✓ RTM must be updated when source code changes"
+          echo "  ✓ ADRs should be created for architectural decisions"
+          echo "  ✓ Documentation should be updated with code"
+          echo "  ✓ PR titles should include CR-ID"
+          echo ""
+          echo "For more information, see:"
+          echo "  📖 /docs/processes/change-management.md"
+          echo "  📖 /docs/requirements/rtm.md"
+          echo "  📖 /docs/arch/adr-template.md"
+          echo ""
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo "::endgroup::"
+
+  check-links:
+    name: Check Documentation Links
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Check for broken links in documentation
+        run: |
+          echo "::group::Link Validation"
+          echo "Checking for broken internal links in documentation..."
+          
+          # Find all markdown files
+          MARKDOWN_FILES=$(find docs .github -name "*.md" 2>/dev/null || true)
+          
+          if [ -z "$MARKDOWN_FILES" ]; then
+            echo "No markdown files found to check"
+            exit 0
+          fi
+          
+          BROKEN_LINKS=0
+          
+          for file in $MARKDOWN_FILES; do
+            echo "Checking: $file"
+            
+            # Extract markdown links [text](/path/to/file.md)
+            LINKS=$(grep -oE '\[([^\]]+)\]\((/[^)]+)\)' "$file" | grep -oE '\(/[^)]+\)' | tr -d '()' || true)
+            
+            for link in $LINKS; do
+              # Skip external links (http/https)
+              if echo "$link" | grep -qE '^https?://'; then
+                continue
+              fi
+              
+              # Skip anchor-only links
+              if echo "$link" | grep -q '^#'; then
+                continue
+              fi
+              
+              # Remove anchor from link
+              link_without_anchor=$(echo "$link" | cut -d'#' -f1)
+              
+              # Check if file exists (relative to repo root)
+              if [ -n "$link_without_anchor" ] && [ ! -f ".${link_without_anchor}" ]; then
+                echo "  ❌ Broken link: $link in $file"
+                BROKEN_LINKS=$((BROKEN_LINKS + 1))
+              fi
+            done
+          done
+          
+          if [ $BROKEN_LINKS -gt 0 ]; then
+            echo ""
+            echo "::error::Found $BROKEN_LINKS broken internal link(s)"
+            exit 1
+          else
+            echo "✅ All internal links appear valid"
+          fi
+          echo "::endgroup::"
+
+  validate-diagrams:
+    name: Validate Mermaid Diagrams
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Mermaid CLI
+        run: |
+          npm install -g @mermaid-js/mermaid-cli
+      
+      - name: Validate Mermaid diagrams
+        run: |
+          echo "::group::Mermaid Diagram Validation"
+          
+          # Find all .mmd files
+          MERMAID_FILES=$(find docs -name "*.mmd" 2>/dev/null || true)
+          
+          if [ -z "$MERMAID_FILES" ]; then
+            echo "No Mermaid diagram files found (.mmd)"
+            echo "This is OK if diagrams are embedded in markdown files"
+            exit 0
+          fi
+          
+          INVALID_DIAGRAMS=0
+          
+          for file in $MERMAID_FILES; do
+            echo "Validating: $file"
+            
+            # Try to compile the diagram (validates syntax)
+            if mmdc -i "$file" -o /tmp/test.svg 2>/dev/null; then
+              echo "  ✅ Valid Mermaid syntax"
+            else
+              echo "  ❌ Invalid Mermaid syntax"
+              INVALID_DIAGRAMS=$((INVALID_DIAGRAMS + 1))
+            fi
+          done
+          
+          if [ $INVALID_DIAGRAMS -gt 0 ]; then
+            echo ""
+            echo "::error::Found $INVALID_DIAGRAMS invalid Mermaid diagram(s)"
+            exit 1
+          else
+            echo "✅ All Mermaid diagrams are valid"
+          fi
+          echo "::endgroup::"
