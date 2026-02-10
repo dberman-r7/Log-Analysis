@@ -29,8 +29,13 @@ For **every** user request, you must execute the following Change Management Loo
 
 #### Step 1: Generate a Change Request (CR)
 
+> **🚨 CRITICAL: FILE CREATION MANDATORY**  
+> The CR document MUST be created as a physical file in the repository at `/docs/processes/change-requests/CR-[ID].md`.  
+> **DO NOT** simply document the CR in a PR description or keep it only in the agent session.  
+> **This is a required, persistent artifact** that must be committed to the repository.
+
 1. **Assign a Unique CR ID**: Format: `CR-YYYY-MM-DD-XXX` (e.g., `CR-2026-02-09-001`)
-2. **Document the CR** in `/docs/processes/change-requests/CR-[ID].md`
+2. **Create the CR File** at `/docs/processes/change-requests/CR-[ID].md` using the template
 3. **CR Contents Must Include**:
    - **Title**: Brief description of the change
    - **Requestor**: User or system initiating the request
@@ -43,7 +48,12 @@ For **every** user request, you must execute the following Change Management Loo
 
 #### Step 2: Perform an Impact Assessment (IA)
 
-Analyze the **Blast Radius** of the proposed change:
+> **📝 MANDATORY: IA MUST BE SAVED IN CR FILE**  
+> The Impact Assessment is NOT a separate document or ephemeral analysis.  
+> It MUST be included as a section within the CR file created in Step 1.  
+> All IA analysis must be persisted in the repository, not just in PR descriptions or agent memory.
+
+Analyze the **Blast Radius** of the proposed change and **document it in the CR file**:
 
 1. **Code Impact**:
    - Files to be created/modified/deleted
@@ -76,7 +86,13 @@ Analyze the **Blast Radius** of the proposed change:
 
 #### Step 3: Draft an Implementation Plan
 
-Create a **step-by-step checklist** that includes:
+> **📋 MANDATORY: PLAN MUST BE SAVED AS SEPARATE FILE**  
+> The Implementation Plan is a SEPARATE, detailed instruction document for agent execution.  
+> It MUST be saved at `/docs/processes/implementation-plans/IMPL-[CR-ID].md`  
+> The plan must contain very detailed, step-by-step instructions that an agent can follow.  
+> Plans must NOT exist only in PR descriptions or agent memory - they are permanent artifacts.
+
+Create a **detailed implementation plan file** that includes:
 
 1. **Pre-Implementation Tasks**:
    - [ ] Requirement decomposition completed
@@ -101,6 +117,24 @@ Create a **step-by-step checklist** that includes:
    - [ ] Documentation reviewed for accuracy
    
 4. **Files to Modify**: Complete list with rationale
+5. **Detailed Agent Instructions**: Very specific commands, file paths, and procedures
+
+> **⚠️ CRITICAL WARNING: ANTI-PATTERNS TO AVOID**  
+> 
+> **DO NOT**:
+> - ❌ Create CR/IA only in PR descriptions (they disappear when PR is merged)
+> - ❌ Create Implementation Plans only in PR descriptions or session memory
+> - ❌ Keep CR/IA/Plans only in agent session memory (lost when session ends)
+> - ❌ Document planning in comments or chat messages only
+> - ❌ Skip file creation and rely on verbal/text communication only
+> 
+> **ALWAYS**:
+> - ✅ Create CR file at `/docs/processes/change-requests/CR-[ID].md` (with IA embedded)
+> - ✅ Create separate Implementation Plan at `/docs/processes/implementation-plans/IMPL-[CR-ID].md`
+> - ✅ Commit both files to the repository before implementation begins
+> - ✅ Make Implementation Plans detailed enough for an agent to execute independently
+> - ✅ Link to both files from PR descriptions (don't duplicate, just link)
+> - ✅ Treat both CR and Plan files as permanent, versioned artifacts
 
 #### Step 4: The "Human-in-the-Loop" Gate
 
