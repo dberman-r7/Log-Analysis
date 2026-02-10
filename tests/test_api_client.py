@@ -47,13 +47,10 @@ def test_api_client_fetches_logs_successfully():
 
     mock_response = Mock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "logs": [
-            {"timestamp": "2026-02-10T10:00:00Z", "message": "Test log 1"},
-            {"timestamp": "2026-02-10T10:00:01Z", "message": "Test log 2"},
-        ],
-        "next_page": None,
-    }
+    mock_response.headers = {"Content-Type": "text/csv"}
+    mock_response.text = """timestamp,level,message
+2026-02-10T10:00:00Z,INFO,Test log 1
+2026-02-10T10:00:01Z,INFO,Test log 2"""
 
     # Act
     from src.log_ingestion.api_client import Rapid7ApiClient
@@ -63,9 +60,10 @@ def test_api_client_fetches_logs_successfully():
         result = client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
 
     # Assert
-    assert "logs" in result
-    assert len(result["logs"]) == 2
-    assert result["logs"][0]["message"] == "Test log 1"
+    assert isinstance(result, str)
+    assert "timestamp,level,message" in result
+    assert "Test log 1" in result
+    assert "Test log 2" in result
 
 
 def test_api_client_handles_401_unauthorized():
@@ -112,11 +110,12 @@ def test_api_client_handles_429_rate_limit():
     # First two calls return 429, third succeeds
     mock_response_429 = Mock()
     mock_response_429.status_code = 429
-    mock_response_429.headers = {"Retry-After": "1"}
+    mock_response_429.headers = {"Retry-After": "1", "Content-Type": "text/csv"}
 
     mock_response_200 = Mock()
     mock_response_200.status_code = 200
-    mock_response_200.json.return_value = {"logs": [], "next_page": None}
+    mock_response_200.headers = {"Content-Type": "text/csv"}
+    mock_response_200.text = "timestamp,level,message\n"
 
     # Act
     from src.log_ingestion.api_client import Rapid7ApiClient
@@ -131,7 +130,8 @@ def test_api_client_handles_429_rate_limit():
 
         # Assert - should have retried and eventually succeeded
         assert mock_get.call_count == 3
-        assert "logs" in result
+        assert isinstance(result, str)
+        assert "timestamp,level,message" in result
         # Should have waited (exponential backoff)
         assert elapsed >= 1.0  # At least some delay
 
@@ -150,6 +150,7 @@ def test_api_client_handles_500_server_error():
 
     mock_response_500 = Mock()
     mock_response_500.status_code = 500
+    mock_response_500.headers = {"Content-Type": "text/csv"}
 
     # Create HTTPError with response attribute
     error_500 = requests.exceptions.HTTPError("500 Server Error")
@@ -159,7 +160,8 @@ def test_api_client_handles_500_server_error():
 
     mock_response_200 = Mock()
     mock_response_200.status_code = 200
-    mock_response_200.json.return_value = {"logs": [], "next_page": None}
+    mock_response_200.headers = {"Content-Type": "text/csv"}
+    mock_response_200.text = "timestamp,level,message\n"
 
     # Act
     from src.log_ingestion.api_client import Rapid7ApiClient
@@ -173,7 +175,8 @@ def test_api_client_handles_500_server_error():
 
         # Assert
         assert mock_get.call_count == 2
-        assert "logs" in result
+        assert isinstance(result, str)
+        assert "timestamp,level,message" in result
 
 
 def test_api_client_respects_rate_limiting():
@@ -190,7 +193,8 @@ def test_api_client_respects_rate_limiting():
 
     mock_response = Mock()
     mock_response.status_code = 200
-    mock_response.json.return_value = {"logs": [], "next_page": None}
+    mock_response.headers = {"Content-Type": "text/csv"}
+    mock_response.text = "timestamp,level,message\n"
 
     # Act
     from src.log_ingestion.api_client import Rapid7ApiClient

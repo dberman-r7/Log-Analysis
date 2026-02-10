@@ -153,19 +153,19 @@ class Rapid7ApiClient:
         if last_exception:
             raise last_exception
 
-    def fetch_logs(self, start_time: str, end_time: str) -> dict[str, Any]:
+    def fetch_logs(self, start_time: str, end_time: str) -> str:
         """
         Fetch logs from Rapid7 InsightOps API for specified time range.
 
-        Handles rate limiting, retries with exponential backoff, and
-        special handling for rate limit (429) responses.
+        Handles rate limiting, retries with exponential backoff, special
+        handling for rate limit (429) responses, and pagination support.
 
         Args:
             start_time: ISO 8601 timestamp for start of time range
             end_time: ISO 8601 timestamp for end of time range
 
         Returns:
-            Dictionary containing logs and pagination info from API response
+            str: CSV-formatted log data (all pages concatenated)
 
         Raises:
             requests.exceptions.HTTPError: For non-retriable HTTP errors (4xx)
@@ -173,44 +173,119 @@ class Rapid7ApiClient:
             requests.exceptions.Timeout: For request timeouts
 
         Example:
-            logs = client.fetch_logs(
+            csv_logs = client.fetch_logs(
                 "2026-02-10T00:00:00Z",
                 "2026-02-10T01:00:00Z"
             )
         """
         logger.info("fetch_logs_start", start_time=start_time, end_time=end_time)
 
-        # Enforce rate limiting
-        self._enforce_rate_limit()
+        # Normalize endpoint URL (remove trailing slash to prevent double-slash)
+        base_url = str(self.config.rapid7_api_endpoint).rstrip("/")
+        url = f"{base_url}/logs"
 
-        # Build request parameters
-        params = {"start_time": start_time, "end_time": end_time}
+        # Collect all log data across pages
+        all_logs_csv = []
+        page_number = 1
+        next_page_token = None
 
-        url = f"{self.config.rapid7_api_endpoint}/logs"
+        while True:
+            # Enforce rate limiting for each page request
+            self._enforce_rate_limit()
 
-        def make_request():
-            """Inner function for retry logic"""
-            response = self.session.get(url, params=params, timeout=30)
+            # Build request parameters
+            params: dict[str, Any] = {
+                "start_time": start_time,
+                "end_time": end_time,
+                "format": "csv",  # Request CSV format explicitly
+            }
 
-            # Handle rate limiting (429)
-            while response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", 1))
-                logger.warning("rate_limit_hit", retry_after_seconds=retry_after)
-                time.sleep(retry_after)
-                # Retry after waiting
-                response = self.session.get(url, params=params, timeout=30)
+            # Add batch size if configured
+            if hasattr(self.config, "api_batch_size"):
+                params["limit"] = self.config.api_batch_size
 
-            # Raise for HTTP errors (4xx, 5xx)
-            response.raise_for_status()
+            # Add pagination token if present
+            if next_page_token:
+                params["page_token"] = next_page_token
 
-            logger.info(
-                "fetch_logs_success",
-                status_code=response.status_code,
-                start_time=start_time,
-                end_time=end_time,
-            )
+            def make_request(current_params=params, current_page=page_number):
+                """Inner function for retry logic"""
+                response = self.session.get(url, params=current_params, timeout=30)
 
-            return response.json()
+                # Handle rate limiting (429)
+                while response.status_code == 429:
+                    retry_after = int(response.headers.get("Retry-After", 1))
+                    logger.warning(
+                        "rate_limit_hit",
+                        retry_after_seconds=retry_after,
+                        page_number=current_page,
+                    )
+                    time.sleep(retry_after)
+                    # Retry after waiting
+                    response = self.session.get(url, params=current_params, timeout=30)
 
-        # Execute with retry logic
-        return self._retry_with_backoff(make_request)
+                # Raise for HTTP errors (4xx, 5xx)
+                response.raise_for_status()
+
+                logger.info(
+                    "fetch_logs_page_success",
+                    status_code=response.status_code,
+                    start_time=start_time,
+                    end_time=end_time,
+                    page_number=current_page,
+                )
+
+                return response
+
+            # Execute with retry logic
+            response = self._retry_with_backoff(make_request)
+
+            # Extract CSV data from response
+            # Response could be plain CSV text or JSON with CSV field
+            content_type = response.headers.get("Content-Type", "")
+
+            if "text/csv" in content_type or "application/csv" in content_type:
+                # Response is direct CSV
+                csv_data = response.text
+                next_page_token = None  # Check headers for pagination
+                if "X-Next-Page-Token" in response.headers:
+                    next_page_token = response.headers["X-Next-Page-Token"]
+            elif "application/json" in content_type:
+                # Response is JSON, extract CSV from 'data' or 'logs' field
+                json_data = response.json()
+                csv_data = json_data.get("data") or json_data.get("logs", "")
+
+                # Check for pagination token in JSON response
+                next_page_token = json_data.get("next_page_token") or json_data.get("next_cursor")
+            else:
+                # Assume text response is CSV
+                csv_data = response.text
+                next_page_token = None
+
+            # For first page, include headers; for subsequent pages, skip first line (headers)
+            if page_number == 1:
+                all_logs_csv.append(csv_data)
+            else:
+                # Skip header line for subsequent pages
+                lines = csv_data.split("\n", 1)
+                if len(lines) > 1:
+                    all_logs_csv.append(lines[1])
+
+            # Check if there are more pages
+            if not next_page_token or not csv_data.strip():
+                break
+
+            page_number += 1
+
+        # Combine all pages into single CSV
+        combined_csv = "\n".join(all_logs_csv)
+
+        logger.info(
+            "fetch_logs_complete",
+            start_time=start_time,
+            end_time=end_time,
+            total_pages=page_number,
+            total_size=len(combined_csv),
+        )
+
+        return combined_csv

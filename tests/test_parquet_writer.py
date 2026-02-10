@@ -317,4 +317,5 @@ def test_writer_creates_output_directory():
         assert output_path.exists()
         assert output_path.is_dir()
         assert output_file.exists()
-        assert output_file.parent == output_path or output_file.parents[1] == output_path
+        # File should be in YYYY/MM/DD subdirectory structure
+        assert str(output_path) in str(output_file.parent)

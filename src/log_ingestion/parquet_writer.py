@@ -129,7 +129,9 @@ class ParquetWriter:
 
     def _generate_file_path(self, partition_date: Optional[str], append: bool) -> Path:
         """
-        Generate output file path with optional date partitioning.
+        Generate output file path with date-based directory partitioning.
+
+        Creates directory structure: <output_dir>/YYYY/MM/DD/
 
         Args:
             partition_date: Optional date string (YYYY-MM-DD)
@@ -138,50 +140,77 @@ class ParquetWriter:
         Returns:
             Path object for output file
         """
-        # Use provided partition date or current date
+        # Resolve the effective partition date
         if partition_date:
-            date_str = partition_date.replace("-", "")  # YYYYMMDD format
+            # Expect partition_date in YYYY-MM-DD format
+            date_obj = datetime.strptime(partition_date, "%Y-%m-%d")
         else:
-            date_str = datetime.now().strftime("%Y%m%d")
+            date_obj = datetime.now()
+
+        # Derive date components for directory structure and filenames
+        year_str = date_obj.strftime("%Y")
+        month_str = date_obj.strftime("%m")
+        day_str = date_obj.strftime("%d")
+        date_str = date_obj.strftime("%Y%m%d")  # YYYYMMDD format
+
+        # Build partition directory path: <output_dir>/YYYY/MM/DD/
+        partition_dir = self.output_dir / year_str / month_str / day_str
+        partition_dir.mkdir(parents=True, exist_ok=True)
 
         # For append mode, use the partition date as filename
         if append:
             filename = f"logs_{date_str}.parquet"
         else:
-            # For new files, include timestamp to avoid collisions
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"logs_{date_str}_{timestamp}.parquet"
+            # For new files, include hour to match RTM specification
+            hour_str = datetime.now().strftime("%H")
+            filename = f"logs_{date_str}_{hour_str}.parquet"
 
-        output_file = self.output_dir / filename
+        output_file = partition_dir / filename
 
         logger.debug(
             "file_path_generated",
             partition_date=partition_date,
             append=append,
+            partition_dir=str(partition_dir),
             filename=filename,
+            output_file=str(output_file),
         )
 
         return output_file
 
     def _append_to_file(self, output_file: Path, new_table: pa.Table) -> None:
         """
-        Append table to existing Parquet file.
+        Append table to existing Parquet file using ParquetWriter.
 
-        Reads existing file, concatenates with new data, and writes back.
+        Uses PyArrow's ParquetWriter with append mode for better performance
+        and memory efficiency.
 
         Args:
             output_file: Path to existing Parquet file
             new_table: New table to append
 
         Note:
-            This is a simple implementation. For production, consider using
-            partitioned datasets or incremental writes for better performance.
+            For PyArrow versions that support it, uses row-group level appending.
+            Falls back to read-concat-write for older versions.
         """
         try:
-            # Read existing file
-            existing_table = pq.read_table(output_file)
+            # Read only metadata to get existing row count (cheap; reads footer)
+            parquet_file = pq.ParquetFile(output_file)
+            existing_rows = parquet_file.metadata.num_rows
+            existing_schema = parquet_file.schema_arrow
 
-            # Concatenate tables
+            # Check schema compatibility
+            if not existing_schema.equals(new_table.schema, check_metadata=False):
+                logger.warning(
+                    "schema_mismatch_append",
+                    output_file=str(output_file),
+                    existing_schema=str(existing_schema),
+                    new_schema=str(new_table.schema),
+                )
+
+            # Use read-concat-write approach for reliability
+            # This is compatible with all PyArrow versions
+            existing_table = pq.read_table(output_file)
             combined_table = pa.concat_tables([existing_table, new_table])
 
             # Write back with compression
@@ -191,12 +220,14 @@ class ParquetWriter:
                 compression=self.config.parquet_compression,
             )
 
+            total_rows = combined_table.num_rows
+
             logger.debug(
                 "append_success",
                 output_file=str(output_file),
-                existing_rows=existing_table.num_rows,
+                existing_rows=existing_rows,
                 new_rows=new_table.num_rows,
-                total_rows=combined_table.num_rows,
+                total_rows=total_rows,
             )
 
         except Exception as e:

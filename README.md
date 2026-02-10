@@ -74,14 +74,13 @@ Comprehensive documentation is located in the [`/docs`](./docs) directory:
 │       ├── config.py                  # Configuration management
 │       ├── main.py                    # Main service entry point
 │       ├── parser.py                  # CSV log parser
-│       └── parquet_writer.py          # Parquet file writer
+│       ├── parquet_writer.py          # Parquet file writer
+│       └── service.py                 # Service orchestration
 ├── tests/                              # Tests
 │   ├── __init__.py
 │   ├── conftest.py                    # Pytest fixtures
 │   ├── test_api_client.py             # API client tests
 │   ├── test_config.py                 # Configuration tests
-│   ├── test_integration.py            # Integration tests
-│   ├── test_main.py                   # Main service tests
 │   ├── test_parser.py                 # Parser tests
 │   └── test_parquet_writer.py         # Parquet writer tests
 └── README.md                           # This file
