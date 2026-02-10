@@ -67,10 +67,60 @@ Comprehensive documentation is located in the [`/docs`](./docs) directory:
 │   │   ├── change-requests/          # Individual CRs
 │   │   └── exemptions/               # Governance exemptions
 │   └── runbooks/                      # Operational runbooks
-├── src/                                # Source code (to be added)
-├── tests/                              # Tests (to be added)
+├── src/                                # Source code
+│   └── log_ingestion/                 # Log ingestion service
+│       ├── __init__.py
+│       ├── api_client.py              # Rapid7 API client
+│       ├── config.py                  # Configuration management
+│       ├── main.py                    # Main service entry point
+│       ├── parser.py                  # CSV log parser
+│       ├── parquet_writer.py          # Parquet file writer
+│       └── service.py                 # Service orchestration
+├── tests/                              # Tests
+│   ├── __init__.py
+│   ├── conftest.py                    # Pytest fixtures
+│   ├── test_api_client.py             # API client tests
+│   ├── test_config.py                 # Configuration tests
+│   ├── test_parser.py                 # Parser tests
+│   └── test_parquet_writer.py         # Parquet writer tests
 └── README.md                           # This file
 ```
+
+---
+
+## 🚀 Features
+
+### Log Ingestion Service
+
+The repository includes a production-ready service for ingesting logs from Rapid7 InsightOps API and storing them in Apache Parquet format for analytics.
+
+**Key Capabilities**:
+- ✅ **API Integration**: Fetch logs from Rapid7 InsightOps with authentication and retry logic
+- ✅ **Dynamic Schema**: Parse CSV logs with automatic schema detection
+- ✅ **Parquet Storage**: Store logs in compressed Parquet format (70-90% size reduction)
+- ✅ **Configuration**: Fully configurable via environment variables
+- ✅ **Observability**: Structured JSON logging with trace context
+- ✅ **Reliability**: Exponential backoff, rate limiting, error handling
+- ✅ **Testing**: >80% test coverage with comprehensive test suite
+
+**Quick Start**:
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure (see .env.example)
+cp .env.example .env
+# Edit .env with your Rapid7 API credentials
+
+# Run service
+python -m src.log_ingestion.main
+```
+
+**Documentation**:
+- **[ADR-0001](./docs/arch/adr/0001-log-ingestion-tech-stack.md)**: Technology stack decisions
+- **[Architecture Diagrams](./docs/arch/diagrams/log-ingestion.mmd)**: System architecture
+- **[Runbook](./docs/runbooks/log-ingestion-service.md)**: Operations guide
+- **[Requirements](./docs/requirements/rtm.md)**: REQ-004 through REQ-011
 
 ---
 

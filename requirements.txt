@@ -1,0 +1,32 @@
+# Core dependencies for Rapid7 InsightOps Log Ingestion Service
+# See ADR-0001 for technology stack rationale
+
+# HTTP client for API calls
+requests>=2.31.0
+
+# Parquet file handling
+pyarrow>=14.0.0
+
+# Data manipulation and CSV parsing
+pandas>=2.1.0
+
+# Configuration validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# Structured logging
+structlog>=23.2.0
+
+# Development dependencies
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+
+# Code quality
+ruff>=0.1.0
+
+# Security scanning
+bandit>=1.7.5
