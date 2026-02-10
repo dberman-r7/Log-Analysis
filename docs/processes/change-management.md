@@ -49,6 +49,24 @@ graph TD
 
 ## Phase 1: Change Request (CR) Creation
 
+> **🚨 CRITICAL REQUIREMENT: FILE CREATION IS MANDATORY**
+> 
+> The CR document is NOT optional and is NOT just a PR description.  
+> You MUST create a physical markdown file in the repository before proceeding.
+> 
+> **Required Actions**:
+> 1. ✅ Create file at `/docs/processes/change-requests/CR-[ID].md`
+> 2. ✅ Use the complete template provided below
+> 3. ✅ Include CR, Impact Assessment, AND Implementation Plan in ONE file
+> 4. ✅ Commit this file to the repository
+> 5. ✅ Link to this file from PR descriptions
+> 
+> **Forbidden Actions**:
+> - ❌ Creating CR only in PR description
+> - ❌ Keeping CR only in agent session memory
+> - ❌ Skipping file creation
+> - ❌ Creating incomplete CR files
+
 ### CR Identification
 
 **CR-ID Format**: `CR-YYYY-MM-DD-XXX`
@@ -60,6 +78,15 @@ graph TD
 **Example**: `CR-2026-02-09-001`
 
 ### CR Document Structure
+
+> **📝 IMPORTANT: This is the CR template (IA included)**
+> 
+> Create a new file at: `/docs/processes/change-requests/CR-[ID].md`  
+> This file MUST contain TWO sections:
+> 1. Change Request (CR) - Basic information and description
+> 2. Impact Assessment (IA) - Blast radius analysis
+> 
+> The Implementation Plan is a SEPARATE file (see Phase 3 below).
 
 Create a new file: `/docs/processes/change-requests/CR-[ID].md`
 
@@ -475,12 +502,47 @@ Include this section in your CR document:
 
 ## Phase 3: Implementation Plan
 
-Create a detailed, step-by-step plan for implementation.
+> **🚨 CRITICAL: SEPARATE FILE FOR IMPLEMENTATION PLAN**
+> 
+> Implementation Plans are SEPARATE from CR documents and require their own file.
+> 
+> **Required Actions**:
+> 1. ✅ Create file at `/docs/processes/implementation-plans/IMPL-[CR-ID].md`
+> 2. ✅ Use the complete template provided below
+> 3. ✅ Make instructions VERY DETAILED for agent execution
+> 4. ✅ Include specific commands, file paths, and exact procedures
+> 5. ✅ Commit this file to the repository
+> 6. ✅ Link from the CR file (add "Implementation Plan: /docs/processes/implementation-plans/IMPL-[CR-ID].md")
+> 
+> **Forbidden Actions**:
+> - ❌ Embedding plan in CR file (keep separate)
+> - ❌ Creating plan only in PR description
+> - ❌ Keeping plan only in session memory
+> - ❌ Creating vague or high-level plans (must be detailed)
+
+Create a detailed, step-by-step plan for implementation as a separate file.
 
 ### Implementation Plan Template
 
+**File Location**: `/docs/processes/implementation-plans/IMPL-[CR-ID].md`
+
 ```markdown
-## Implementation Plan
+# Implementation Plan: IMPL-[CR-ID]
+
+**Related CR**: [CR-[ID]](/docs/processes/change-requests/CR-[ID].md)  
+**Plan Version**: 1.0  
+**Created**: YYYY-MM-DD  
+**Last Updated**: YYYY-MM-DD
+
+---
+
+## Overview
+
+**Objective**: [What this implementation achieves]  
+**CR Summary**: [Brief summary of the change request]  
+**Complexity**: [Low | Medium | High | Very High]
+
+---
 
 **Plan Version**: 1.0
 **Created**: YYYY-MM-DD

@@ -1,6 +1,9 @@
 # Change Request Template
 
-**Instructions**: Copy this template to `/docs/processes/change-requests/CR-YYYY-MM-DD-XXX.md` and fill it out.
+**Instructions**: 
+1. Copy this template to `/docs/processes/change-requests/CR-YYYY-MM-DD-XXX.md` and fill it out.
+2. This file contains the CR and Impact Assessment.
+3. Create a SEPARATE Implementation Plan at `/docs/processes/implementation-plans/IMPL-CR-YYYY-MM-DD-XXX.md` using the impl-plan-template.md
 
 ---
 
@@ -10,6 +13,8 @@
 
 **Created**: YYYY-MM-DD HH:MM:SS UTC  
 **Last Updated**: YYYY-MM-DD HH:MM:SS UTC
+
+**Implementation Plan**: [/docs/processes/implementation-plans/IMPL-CR-YYYY-MM-DD-XXX.md](/docs/processes/implementation-plans/IMPL-CR-YYYY-MM-DD-XXX.md)
 
 ---
 

@@ -39,6 +39,7 @@ This document is the **single source of truth** for all system requirements. Eve
 | REQ-001 | [FUNC] | Example: System shall parse log files | PROPOSED | P2 | - | - | - | 2026-02-09 |
 | REQ-002 | [NFR-PERF] | Example: Parsing shall complete < 100ms for files < 1MB | PROPOSED | P2 | - | - | - | 2026-02-09 |
 | REQ-003 | [NFR-SEC] | Example: Input paths validated for directory traversal | PROPOSED | P1 | - | - | - | 2026-02-09 |
+| REQ-DOC-001 | [NFR-MAINT] | All governance artifacts (CR, IA, Implementation Plans) must be persisted as markdown files in `/docs/processes/change-requests/` | IMPLEMENTED | P1 | .github/copilot-instructions.md, docs/processes/change-management.md | - | CR-2026-02-09-001 | 2026-02-10 |
 
 ---
 
@@ -80,7 +81,7 @@ This document is the **single source of truth** for all system requirements. Eve
 
 | REQ-ID | Description | Status | Implementation |
 |--------|-------------|--------|----------------|
-| - | No requirements defined yet | - | - |
+| REQ-DOC-001 | All governance artifacts must be persisted as markdown files | IMPLEMENTED | .github/copilot-instructions.md, docs/processes/change-management.md |
 
 #### Observability (NFR-OBS)
 
@@ -166,6 +167,40 @@ All file path inputs must be validated to prevent directory traversal attacks.
 
 **Threat Model**: TBD  
 **Mitigation**: TBD
+
+---
+
+### REQ-DOC-001: Governance Artifact Persistence
+**Category**: [NFR-MAINT]  
+**Priority**: P1  
+**Status**: IMPLEMENTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+All governance artifacts including Change Requests (CRs), Impact Assessments (IAs), and Implementation Plans MUST be persisted as markdown files in the repository at `/docs/processes/change-requests/CR-[ID].md`. These documents must NOT exist only in PR descriptions or agent session memory.
+
+**Acceptance Criteria**:
+- [x] CR template includes sections for IA and Implementation Plan
+- [x] Copilot instructions explicitly require file creation
+- [x] Change management process explicitly requires file creation
+- [x] Anti-patterns documented (no PR-only, no session-only)
+- [x] File path and naming convention clearly specified
+
+**Rationale**:
+- Ensures audit trail is preserved in version control
+- Prevents loss of planning artifacts when sessions end or PRs are merged
+- Aligns with "Docs are Code" principle
+- Enables traceability from code changes to planning decisions
+- Supports compliance and governance requirements
+
+**Related Requirements**:
+- None (this IS a governance requirement)
+
+**Implemented In**:
+- File: `.github/copilot-instructions.md` (Steps 1-3, warning section)
+- File: `docs/processes/change-management.md` (Phase 1 requirements)
+
+**Related CR**: CR-2026-02-09-001
 
 ---
 
