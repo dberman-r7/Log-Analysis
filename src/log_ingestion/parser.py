@@ -8,7 +8,7 @@ See ADR-0001 for rationale of using pandas for CSV parsing.
 """
 
 from io import StringIO
-from typing import Any
+from typing import Any, Optional
 
 import pandas as pd
 import structlog
@@ -91,7 +91,7 @@ class LogParser:
             logger.error("schema_detection_failed", error=str(e))
             return {}
 
-    def get_schema(self) -> dict[str, Any] | None:
+    def get_schema(self) -> Optional[dict[str, Any]]:
         """
         Get the cached schema from the last parse operation.
 

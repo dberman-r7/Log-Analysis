@@ -47,6 +47,14 @@ This document is the **single source of truth** for all system requirements. Eve
 | REQ-009 | [NFR-SEC] | API credentials shall be stored in environment variables only | APPROVED | P0 | - | - | ADR-0001 | 2026-02-10 |
 | REQ-010 | [NFR-OBS] | Service shall emit structured JSON logs with trace context | APPROVED | P2 | - | - | ADR-0001 | 2026-02-10 |
 | REQ-011 | [NFR-PERF] | Service shall process logs efficiently using batching | APPROVED | P2 | - | - | ADR-0001 | 2026-02-10 |
+| REQ-012 | [FUNC] | Service shall authenticate to Rapid7 Log Search API using `x-api-key` header | TESTED | P1 | `/src/log_ingestion/api_client.py` | `/tests/test_api_client.py` | ADR-0001 | 2026-02-10 |
+| REQ-013 | [FUNC] | Service shall poll Log Search queries to completion via `links[rel=Self]` with bounded exponential backoff | TESTED | P1 | `/src/log_ingestion/api_client.py` | `/tests/test_api_client.py` | ADR-0001 | 2026-02-10 |
+| REQ-014 | [FUNC] | Service shall retrieve all pages of Log Search results via `links[rel=Next]` | TESTED | P1 | `/src/log_ingestion/api_client.py` | `/tests/test_api_client.py` | ADR-0001 | 2026-02-10 |
+| REQ-015 | [NFR-REL] | Service shall handle HTTP 429 using `X-RateLimit-Reset` and retry without silent failure | TESTED | P1 | `/src/log_ingestion/api_client.py` | `/tests/test_api_client.py` | ADR-0001 | 2026-02-10 |
+| REQ-016 | [FUNC] | Utility shall list available Log Search log sets for the configured region | TESTED | P2 | `/src/log_ingestion/api_client.py:Rapid7ApiClient.list_log_sets()` | `/tests/test_api_client_list_log_sets_embedded_logs_info.py` | ADR-0001 | 2026-02-10 |
+| REQ-017 | [FUNC] | Utility shall allow user to select a log set (by index or id) and then list logs within the selected log set using embedded `logs_info` from the logsets list response | TESTED | P2 | `/src/log_ingestion/main.py:_run_log_selection()`, `/src/log_ingestion/log_selection.py`, `/src/log_ingestion/api_client.py:Rapid7ApiClient.list_log_sets()` | `/tests/test_log_selection.py`, `/tests/test_main_select_log.py`, `/tests/test_api_client_list_log_sets_embedded_logs_info.py` | ADR-0001 | 2026-02-10 |
+| REQ-018 | [FUNC] | Utility shall persist selected log id to `.env` as `RAPID7_LOG_KEY` without logging secrets | TESTED | P2 | `/src/log_ingestion/main.py`, `/src/log_ingestion/env_utils.py` | `/tests/test_env_utils.py`, `/tests/test_main_select_log.py` | ADR-0001 | 2026-02-10 |
+| REQ-019 | [NFR-REL] | Utility shall not call per-logset membership endpoints in environments where log membership is provided inline via `logs_info`, and shall fail loudly with actionable guidance when embedded membership is missing | TESTED | P1 | `/src/log_ingestion/main.py:_run_log_selection()`, `/src/log_ingestion/api_client.py:Rapid7ApiClient.list_logs_in_log_set()` | `/tests/test_main_select_log.py`, `/tests/test_api_client_list_logs_in_log_set_fallback_404.py` | ADR-0001 | 2026-02-10 |
 
 ---
 
@@ -499,7 +507,7 @@ Service shall emit structured JSON logs with trace context for observability. Al
   "environment": "production",
   "trace_id": "abc123",
   "event": "event_name",
-  "context": {...}
+  "context": {"key": "value"}
 }
 ```
 
@@ -528,7 +536,7 @@ Service shall emit structured JSON logs with trace context for observability. Al
 
 ---
 
-### REQ-011: Efficient Batch Processing
+### REQ-011: Service Shall Process Logs Efficiently Using Batching
 **Category**: [NFR-PERF]  
 **Priority**: P2  
 **Status**: APPROVED  
@@ -579,6 +587,241 @@ Service shall process logs efficiently using batching to achieve target throughp
 
 ---
 
+### REQ-012: Rapid7 Log Search API Authentication
+**Category**: [FUNC]  
+**Priority**: P1  
+**Status**: TESTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+Service shall authenticate to the Rapid7 Log Search API using the `x-api-key` request header.
+
+**Acceptance Criteria**:
+- [ ] `x-api-key` header is set on all Log Search requests
+- [ ] No API keys are hardcoded
+- [ ] Authentication failures are logged and raised
+
+**Related Requirements**:
+- REQ-009
+
+**Implemented In**:
+- File: `/src/log_ingestion/api_client.py`
+
+**Test Coverage**:
+- File: `/tests/test_api_client.py`
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-013: Poll Log Search Query to Completion
+**Category**: [FUNC]  
+**Priority**: P1  
+**Status**: TESTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+Service shall poll Log Search query continuations until completion when the response contains `links` with `rel=Self`.
+
+**Acceptance Criteria**:
+- [ ] Client detects “in progress” responses via `links[rel=Self]`
+- [ ] Client polls the `Self` URL until completion
+- [ ] Poll delay uses bounded exponential backoff (starts small, caps at a maximum)
+- [ ] Invalid link shapes fail loudly with a descriptive error
+
+**Implemented In**:
+- File: `/src/log_ingestion/api_client.py`
+
+**Test Coverage**:
+- File: `/tests/test_api_client.py`
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-014: Link-based Pagination for Log Search Results
+**Category**: [FUNC]  
+**Priority**: P1  
+**Status**: TESTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+Service shall retrieve all pages of Log Search results by following `links[rel=Next]` until no next page exists.
+
+**Acceptance Criteria**:
+- [ ] Client detects next pages via `links[rel=Next]`
+- [ ] Client requests the next page URL and polls to completion when needed
+- [ ] Client returns a complete aggregated result set
+
+**Implemented In**:
+- File: `/src/log_ingestion/api_client.py`
+
+**Test Coverage**:
+- File: `/tests/test_api_client.py`
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-015: Rate Limit Reset Handling for Log Search
+**Category**: [NFR-REL]  
+**Priority**: P1  
+**Status**: TESTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+Service shall handle HTTP 429 rate limiting by honoring the `X-RateLimit-Reset` header (seconds until reset) and retrying.
+
+**Acceptance Criteria**:
+- [ ] On 429, client reads `X-RateLimit-Reset` as an integer seconds value
+- [ ] Client logs rate limiting and sleeps for the specified duration
+- [ ] Client retries and either succeeds or fails loudly after bounded attempts
+
+**Implemented In**:
+- File: `/src/log_ingestion/api_client.py`
+
+**Test Coverage**:
+- File: `/tests/test_api_client.py`
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-016: List Available Log Sets
+**Category**: [FUNC]  
+**Priority**: P2  
+**Status**: TESTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+Utility shall list available Log Search log sets for the configured region. This feature is read-only and does not modify any state.
+
+**Acceptance Criteria**:
+- [ ] Client can list log sets for the configured region
+- [ ] Output includes log set ID, name, and description
+- [ ] No sensitive data is exposed in log set details
+- [ ] Results are paginated if there are many log sets
+
+**Related Requirements**:
+- REQ-004 (Authentication dependency)
+
+**Implemented In**:
+- File: `/src/log_ingestion/api_client.py`
+- Function: `list_log_sets()`
+
+**Test Coverage**:
+- Test File: `/tests/test_api_client.py`
+- Test Cases:
+  - `test_list_log_sets_success()`
+  - `test_list_log_sets_pagination()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-017: Select Log Set and List Logs
+**Category**: [FUNC]  
+**Priority**: P2  
+**Status**: TESTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+Utility shall allow user to select a log set (by index or id) and then list logs within the selected log set using embedded `logs_info` from the logsets list response. This feature enables targeting specific logs for ingestion.
+
+**Acceptance Criteria**:
+- [ ] User can select a log set by index or ID
+- [ ] System remembers the selected log set for the session
+- [ ] User can list logs within the selected log set
+- [ ] Log listing shows log ID, name, and metadata
+- [ ] No sensitive data is exposed in log details
+
+**Related Requirements**:
+- REQ-004 (Authentication dependency)
+- REQ-016 (Log set listing)
+
+**Implemented In**:
+- File: `/src/log_ingestion/main.py`, `/src/log_ingestion/log_selection.py`, `/src/log_ingestion/api_client.py`
+- Function: `select_log_set()`, `list_logs_in_selected_set()`
+
+**Test Coverage**:
+- Test File: `/tests/test_log_selection.py`, `/tests/test_api_client.py`
+- Test Cases:
+  - `test_select_log_set_by_index()`
+  - `test_select_log_set_by_id()`
+  - `test_list_logs_in_selected_set()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-018: Persist Selected Log ID
+**Category**: [FUNC]  
+**Priority**: P2  
+**Status**: TESTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+Utility shall persist selected log id to `.env` as `RAPID7_LOG_KEY` without logging secrets. This ensures the selected log set is used for subsequent ingestion runs.
+
+**Acceptance Criteria**:
+- [ ] Selected log ID is saved to `.env` as `RAPID7_LOG_KEY`
+- [ ] No sensitive data is logged during this process
+- [ ] Existing comments and formatting in `.env` are preserved
+- [ ] Changes to `.env` are detected and applied without restart
+
+**Related Requirements**:
+- REQ-009 (Security requirement - no credentials in logs)
+- REQ-017 (Log set selection)
+
+**Implemented In**:
+- File: `/src/log_ingestion/main.py`, `/src/log_ingestion/env_utils.py`
+- Function: `persist_selected_log_id()`
+
+**Test Coverage**:
+- Test File: `/tests/test_env_utils.py`
+- Test Cases:
+  - `test_persist_selected_log_id()`
+  - `test_log_id_persistence_across_sessions()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-019: Inline Log Membership Requirement
+**Category**: [NFR-REL]  
+**Priority**: P1  
+**Status**: TESTED  
+**Date Added**: 2026-02-10
+
+**Description**:  
+Utility shall not call per-logset membership endpoints in environments where log membership is provided inline via `logs_info`, and shall fail loudly with actionable guidance when embedded membership is missing.
+
+**Acceptance Criteria**:
+- [ ] In unsupported environments, log set selection does not call membership endpoints
+- [ ] System fails with clear error message if `logs_info` is missing
+- [ ] Documentation is updated to reflect environment compatibility requirements
+
+**Related Requirements**:
+- REQ-017 (Log set selection)
+
+**Implemented In**:
+- File: `/src/log_ingestion/main.py`, `/src/log_ingestion/api_client.py`
+- Function: `_run_log_selection()`, `list_logs_in_log_set()`
+
+**Test Coverage**:
+- Test File: `/tests/test_main_select_log.py`, `/tests/test_api_client_list_logs_in_log_set_fallback_404.py`
+- Test Cases:
+  - `test_log_set_selection_unsupported_env()`
+  - `test_log_set_selection_supported_env()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
 ## Traceability Views
 
 ### By Status
@@ -596,7 +839,7 @@ Service shall process logs efficiently using batching to achieve target throughp
 - (None yet)
 
 #### TESTED
-- (None yet)
+- REQ-012, REQ-013, REQ-014, REQ-015, REQ-016, REQ-017, REQ-018, REQ-019
 
 #### DEPLOYED
 - (None yet)
@@ -615,7 +858,7 @@ Service shall process logs efficiently using batching to achieve target throughp
 - REQ-003, REQ-004, REQ-005, REQ-006, REQ-007
 
 #### P2 - MEDIUM
-- REQ-001, REQ-002, REQ-008, REQ-010, REQ-011
+- REQ-001, REQ-002, REQ-008, REQ-010, REQ-011, REQ-016, REQ-017, REQ-018
 
 #### P3 - LOW
 - (None yet)
@@ -628,6 +871,9 @@ Service shall process logs efficiently using batching to achieve target throughp
 |------|---------|-------------------|------------|--------------|
 | 2026-02-09 | REQ-001, REQ-002, REQ-003 | Initial example requirements | System | - |
 | 2026-02-10 | REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011 | Log ingestion service requirements | Development Team | CR-2026-02-10-001 |
+| 2026-02-10 | REQ-012, REQ-013, REQ-014, REQ-015 | Log Search API requirements | Development Team | CR-2026-02-10-002 |
+| 2026-02-10 | REQ-016, REQ-017, REQ-018, REQ-019 | Log set selection and persistence requirements | Development Team | CR-2026-02-10-003 |
+| 2026-02-10 | REQ-016, REQ-017, REQ-018, REQ-019 | Mark log set selection requirements as TESTED and update trace links for embedded `logs_info` selection flow | Development Team | CR-2026-02-10-006 |
 
 ---
 
@@ -698,28 +944,28 @@ Before considering a requirement "complete", verify:
 
 ### Coverage Statistics
 
-- **Total Requirements**: 11
+- **Total Requirements**: 19
 - **Implemented**: 0 (0%)
-- **Tested**: 0 (0%)
+- **Tested**: 8 (42%)
 - **Deployed**: 0 (0%)
-- **Approved**: 8 (73%)
+- **Approved**: 8 (42%)
 
 ### By Category
 
-- **Functional**: 6 (55%)
-- **Performance**: 2 (18%)
-- **Security**: 2 (18%)
-- **Observability**: 1 (9%)
-- **Reliability**: 0 (0%)
+- **Functional**: 10 (53%)
+- **Performance**: 2 (11%)
+- **Security**: 3 (16%)
+- **Observability**: 1 (5%)
+- **Reliability**: 2 (11%)
 - **Scalability**: 0 (0%)
 - **Maintainability**: 0 (0%)
 
 ### By Priority
 
-- **P0 (Critical)**: 1 (9%)
-- **P1 (High)**: 5 (45%)
-- **P2 (Medium)**: 5 (45%)
-- **P3 (Low)**: 0 (0%)
+- **P0 (Critical)**: 1 (5%)
+- **P1 (High)**: 6 (32%)
+- **P2 (Medium)**: 12 (63%)
+- **P3 - LOW**: 0 (0%)
 
 ---
 

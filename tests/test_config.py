@@ -15,7 +15,8 @@ def test_config_loads_from_environment(monkeypatch):
     """Test that configuration loads from environment variables"""
     # Arrange
     monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
-    monkeypatch.setenv("RAPID7_API_ENDPOINT", "https://api.example.com")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
+    monkeypatch.setenv("RAPID7_DATA_STORAGE_REGION", "eu")
     monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
 
     # Act
@@ -25,14 +26,15 @@ def test_config_loads_from_environment(monkeypatch):
 
     # Assert
     assert config.rapid7_api_key == "test_key_123"
-    assert str(config.rapid7_api_endpoint) == "https://api.example.com/"
+    assert config.rapid7_log_key == "log-key-123"
+    assert config.rapid7_data_storage_region == "eu"
     assert config.output_dir == Path("/tmp/test_output")
 
 
 def test_config_validates_required_fields():
     """Test that missing required fields raise validation error"""
     # Clear any environment variables that might be set
-    for key in ["RAPID7_API_KEY", "RAPID7_API_ENDPOINT", "OUTPUT_DIR"]:
+    for key in ["RAPID7_API_KEY", "RAPID7_LOG_KEY", "OUTPUT_DIR"]:
         os.environ.pop(key, None)
 
     # Act & Assert
@@ -48,7 +50,7 @@ def test_config_uses_default_values(monkeypatch):
     """Test that optional fields have sensible defaults"""
     # Arrange - set only required fields
     monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
-    monkeypatch.setenv("RAPID7_API_ENDPOINT", "https://api.example.com")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
     monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
 
     # Act
@@ -65,10 +67,11 @@ def test_config_uses_default_values(monkeypatch):
 
 
 def test_config_validates_api_endpoint_format(monkeypatch):
-    """Test that API endpoint must be valid URL"""
-    # Arrange - invalid URL
+    """Test that provider region settings are validated"""
+    # Arrange - invalid region
     monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
-    monkeypatch.setenv("RAPID7_API_ENDPOINT", "not-a-valid-url")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
+    monkeypatch.setenv("RAPID7_DATA_STORAGE_REGION", "not-a-region")
     monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
 
     # Act & Assert
@@ -84,7 +87,7 @@ def test_config_accepts_valid_log_levels(monkeypatch):
     """Test that valid log levels are accepted"""
     # Arrange
     monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
-    monkeypatch.setenv("RAPID7_API_ENDPOINT", "https://api.example.com")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
     monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
 
     for level in ["DEBUG", "INFO", "WARNING", "ERROR"]:
@@ -103,7 +106,7 @@ def test_config_validates_batch_size_range(monkeypatch):
     """Test that batch size must be within valid range"""
     # Arrange
     monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
-    monkeypatch.setenv("RAPID7_API_ENDPOINT", "https://api.example.com")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
     monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
 
     # Test valid batch size
@@ -128,7 +131,7 @@ def test_config_output_dir_as_path(monkeypatch):
     """Test that output_dir is converted to Path object"""
     # Arrange
     monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
-    monkeypatch.setenv("RAPID7_API_ENDPOINT", "https://api.example.com")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
     monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
 
     # Act

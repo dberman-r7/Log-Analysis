@@ -1,53 +1,42 @@
 """
-Rapid7 InsightOps API Client
+Rapid7 InsightOps Log Search API Client
 
-Handles authentication, request/response, retry logic, and rate limiting
-for interactions with the Rapid7 InsightOps API.
+Implements provider Log Search workflow:
+- Authenticate using `x-api-key`
+- Submit query request with from/to/query params
+- Poll `links[rel=Self]` until completion
+- Follow `links[rel=Next]` for pagination
+- Handle 429 with `X-RateLimit-Reset`
 
-See ADR-0001 for rationale of using requests library.
+See CR-2026-02-10-002, REQ-012..REQ-015.
 """
 
+import json
 import time
-from typing import Any
+from typing import Any, Dict, Optional
 
 import requests
 import structlog
 
 from .config import LogIngestionConfig
+from .log_selection import LogDescriptor, LogSetDescriptor
 
 logger = structlog.get_logger()
 
 
+class RateLimitedException(Exception):
+    def __init__(self, message: str, secs_until_reset: int):
+        super().__init__(message)
+        self.secs_until_reset = secs_until_reset
+
+
 class Rapid7ApiClient:
-    """
-    Client for interacting with Rapid7 InsightOps API.
-
-    Provides methods to fetch logs with automatic retry logic,
-    rate limiting, and comprehensive error handling.
-
-    Attributes:
-        config: Configuration object with API credentials and settings
-        session: Persistent HTTP session with authentication headers
-        last_request_time: Timestamp of last API request for rate limiting
-
-    Example:
-        config = LogIngestionConfig()
-        client = Rapid7ApiClient(config)
-        logs = client.fetch_logs("2026-02-10T00:00:00Z", "2026-02-10T01:00:00Z")
-    """
-
     def __init__(self, config: LogIngestionConfig):
-        """
-        Initialize the API client with configuration.
-
-        Args:
-            config: LogIngestionConfig object with API credentials and settings
-        """
         self.config = config
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "Authorization": f"Bearer {config.rapid7_api_key}",
+                "x-api-key": config.rapid7_api_key,
                 "Content-Type": "application/json",
                 "User-Agent": "log-ingestion-service/0.1.0",
             }
@@ -56,236 +45,342 @@ class Rapid7ApiClient:
 
         logger.info(
             "api_client_initialized",
-            endpoint=str(config.rapid7_api_endpoint),
-            rate_limit=config.rate_limit,
+            region=config.rapid7_data_storage_region,
             retry_attempts=config.retry_attempts,
+            rate_limit=config.rate_limit,
         )
 
     def _enforce_rate_limit(self) -> None:
-        """
-        Enforce rate limiting between API requests.
-
-        Sleeps if necessary to maintain the configured rate limit.
-        Rate limit is specified in requests per minute.
-        """
         if self.last_request_time > 0:
-            # Calculate minimum time between requests (in seconds)
             min_interval = 60.0 / self.config.rate_limit
             elapsed = time.time() - self.last_request_time
-
             if elapsed < min_interval:
                 sleep_time = min_interval - elapsed
                 logger.debug("rate_limit_sleep", sleep_seconds=sleep_time)
                 time.sleep(sleep_time)
-
         self.last_request_time = time.time()
 
-    def _retry_with_backoff(self, func, *args, max_retries: int = None, **kwargs) -> Any:
+    def _request_get(
+        self, url: str, *, params: Optional[Dict[str, Any]] = None
+    ) -> requests.Response:
+        """GET with basic retry for transient network failures.
+
+        Retries are bounded by `config.retry_attempts` and use a small exponential backoff.
         """
-        Execute function with exponential backoff retry logic.
-
-        Args:
-            func: Function to execute
-            *args: Positional arguments for func
-            max_retries: Maximum retry attempts (defaults to config.retry_attempts)
-            **kwargs: Keyword arguments for func
-
-        Returns:
-            Result of successful function execution
-
-        Raises:
-            Last exception encountered if all retries exhausted
-        """
-        if max_retries is None:
-            max_retries = self.config.retry_attempts
-
-        last_exception = None
-
-        for attempt in range(max_retries + 1):
-            try:
-                return func(*args, **kwargs)
-            except (
-                requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout,
-            ) as e:
-                last_exception = e
-                if attempt < max_retries:
-                    # Exponential backoff: 1s, 2s, 4s, 8s, ...
-                    sleep_time = 2**attempt
-                    logger.warning(
-                        "retry_network_error",
-                        attempt=attempt + 1,
-                        max_retries=max_retries,
-                        sleep_seconds=sleep_time,
-                        error=str(e),
-                    )
-                    time.sleep(sleep_time)
-                else:
-                    logger.error(
-                        "retry_exhausted_network_error",
-                        attempts=attempt + 1,
-                        error=str(e),
-                    )
-                    raise
-            except requests.exceptions.HTTPError as e:
-                # Check for retriable HTTP errors (5xx server errors)
-                status_code = None
-                if hasattr(e, "response") and e.response is not None:
-                    status_code = e.response.status_code
-                    if 500 <= status_code < 600:
-                        # Server error - retry
-                        last_exception = e
-                        if attempt < max_retries:
-                            sleep_time = 2**attempt
-                            logger.warning(
-                                "retry_server_error",
-                                attempt=attempt + 1,
-                                status_code=status_code,
-                                sleep_seconds=sleep_time,
-                            )
-                            time.sleep(sleep_time)
-                            continue
-                # Non-retriable HTTP error (4xx) - raise immediately
-                logger.error("http_error", status_code=status_code, error=str(e))
-                raise
-
-        # If we get here, all retries exhausted
-        if last_exception:
-            raise last_exception
-
-    def fetch_logs(self, start_time: str, end_time: str) -> str:
-        """
-        Fetch logs from Rapid7 InsightOps API for specified time range.
-
-        Handles rate limiting, retries with exponential backoff, special
-        handling for rate limit (429) responses, and pagination support.
-
-        Args:
-            start_time: ISO 8601 timestamp for start of time range
-            end_time: ISO 8601 timestamp for end of time range
-
-        Returns:
-            str: CSV-formatted log data (all pages concatenated)
-
-        Raises:
-            requests.exceptions.HTTPError: For non-retriable HTTP errors (4xx)
-            requests.exceptions.ConnectionError: For network connectivity issues
-            requests.exceptions.Timeout: For request timeouts
-
-        Example:
-            csv_logs = client.fetch_logs(
-                "2026-02-10T00:00:00Z",
-                "2026-02-10T01:00:00Z"
-            )
-        """
-        logger.info("fetch_logs_start", start_time=start_time, end_time=end_time)
-
-        # Normalize endpoint URL (remove trailing slash to prevent double-slash)
-        base_url = str(self.config.rapid7_api_endpoint).rstrip("/")
-        url = f"{base_url}/logs"
-
-        # Collect all log data across pages
-        all_logs_csv = []
-        page_number = 1
-        next_page_token = None
-
+        attempts = 0
+        backoff = 0.25
         while True:
-            # Enforce rate limiting for each page request
             self._enforce_rate_limit()
-
-            # Build request parameters
-            params: dict[str, Any] = {
-                "start_time": start_time,
-                "end_time": end_time,
-                "format": "csv",  # Request CSV format explicitly
-            }
-
-            # Add batch size if configured
-            if hasattr(self.config, "api_batch_size"):
-                params["limit"] = self.config.api_batch_size
-
-            # Add pagination token if present
-            if next_page_token:
-                params["page_token"] = next_page_token
-
-            def make_request(current_params=params, current_page=page_number):
-                """Inner function for retry logic"""
-                response = self.session.get(url, params=current_params, timeout=30)
-
-                # Handle rate limiting (429)
-                while response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", 1))
-                    logger.warning(
-                        "rate_limit_hit",
-                        retry_after_seconds=retry_after,
-                        page_number=current_page,
-                    )
-                    time.sleep(retry_after)
-                    # Retry after waiting
-                    response = self.session.get(url, params=current_params, timeout=30)
-
-                # Raise for HTTP errors (4xx, 5xx)
-                response.raise_for_status()
-
-                logger.info(
-                    "fetch_logs_page_success",
-                    status_code=response.status_code,
-                    start_time=start_time,
-                    end_time=end_time,
-                    page_number=current_page,
+            try:
+                resp = self.session.get(url, params=params, timeout=30)
+                return resp
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                attempts += 1
+                if attempts >= self.config.retry_attempts:
+                    raise
+                logger.warning(
+                    "logsearch_request_retry",
+                    url=url,
+                    attempt=attempts,
+                    max_attempts=self.config.retry_attempts,
+                    backoff_seconds=backoff,
                 )
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 2.0)
 
-                return response
+    @staticmethod
+    def _links_map(body: dict[str, Any]) -> dict[str, str]:
+        links = body.get("links")
+        if not links:
+            return {}
+        if not isinstance(links, list):
+            raise ValueError("Invalid Log Search response: 'links' must be a list")
+        mapped: dict[str, str] = {}
+        for link in links:
+            if not isinstance(link, dict) or "rel" not in link or "href" not in link:
+                raise ValueError(
+                    "Invalid Log Search response: each link must contain 'rel' and 'href'"
+                )
+            mapped[str(link["rel"])] = str(link["href"])
+        return mapped
 
-            # Execute with retry logic
-            response = self._retry_with_backoff(make_request)
-
-            # Extract CSV data from response
-            # Response could be plain CSV text or JSON with CSV field
-            content_type = response.headers.get("Content-Type", "")
-
-            if "text/csv" in content_type or "application/csv" in content_type:
-                # Response is direct CSV
-                csv_data = response.text
-                next_page_token = None  # Check headers for pagination
-                if "X-Next-Page-Token" in response.headers:
-                    next_page_token = response.headers["X-Next-Page-Token"]
-            elif "application/json" in content_type:
-                # Response is JSON, extract CSV from 'data' or 'logs' field
-                json_data = response.json()
-                csv_data = json_data.get("data") or json_data.get("logs", "")
-
-                # Check for pagination token in JSON response
-                next_page_token = json_data.get("next_page_token") or json_data.get("next_cursor")
-            else:
-                # Assume text response is CSV
-                csv_data = response.text
-                next_page_token = None
-
-            # For first page, include headers; for subsequent pages, skip first line (headers)
-            if page_number == 1:
-                all_logs_csv.append(csv_data)
-            else:
-                # Skip header line for subsequent pages
-                lines = csv_data.split("\n", 1)
-                if len(lines) > 1:
-                    all_logs_csv.append(lines[1])
-
-            # Check if there are more pages
-            if not next_page_token or not csv_data.strip():
-                break
-
-            page_number += 1
-
-        # Combine all pages into single CSV
-        combined_csv = "\n".join(all_logs_csv)
-
-        logger.info(
-            "fetch_logs_complete",
-            start_time=start_time,
-            end_time=end_time,
-            total_pages=page_number,
-            total_size=len(combined_csv),
+    @classmethod
+    def _is_query_in_progress(cls, body: dict[str, Any]) -> bool:
+        links = cls._links_map(body)
+        if not links:
+            return False
+        # Provider spec: Self => still running; Next => terminal page ready
+        if "Self" in links:
+            return True
+        if "Next" in links:
+            return False
+        # If links exists but neither rel appears, fail loudly.
+        raise ValueError(
+            "Invalid Log Search response: 'links' present but missing rel 'Self' or 'Next'"
         )
 
-        return combined_csv
+    @staticmethod
+    def _raise_rate_limited(resp: requests.Response) -> None:
+        if resp.status_code != 429:
+            return
+        secs_until_reset = resp.headers.get("X-RateLimit-Reset")
+        if secs_until_reset is None:
+            secs_until_reset_int = 1
+        else:
+            try:
+                secs_until_reset_int = int(secs_until_reset)
+            except ValueError:
+                secs_until_reset_int = 1
+        raise RateLimitedException(
+            f"Log Search API key rate limited. Seconds until reset: {secs_until_reset}",
+            secs_until_reset_int,
+        )
+
+    def _poll_request_to_completion(self, initial_resp: requests.Response) -> requests.Response:
+        self._raise_rate_limited(initial_resp)
+
+        body = initial_resp.json()
+        if not self._is_query_in_progress(body):
+            return initial_resp
+
+        poll_delay = 0.5
+        max_poll_delay = 6.0
+
+        links = self._links_map(body)
+        while "Self" in links:
+            time.sleep(poll_delay)
+            resp = self._request_get(links["Self"])
+            self._raise_rate_limited(resp)
+
+            body = resp.json()
+            if not self._is_query_in_progress(body):
+                return resp
+
+            poll_delay = min(poll_delay * 2, max_poll_delay)
+            links = self._links_map(body)
+
+        return initial_resp
+
+    @staticmethod
+    def _has_next_page(body: dict[str, Any]) -> bool:
+        try:
+            links = Rapid7ApiClient._links_map(body)
+        except ValueError:
+            return False
+        return "Next" in links
+
+    def _get_next_page(self, resp: requests.Response) -> requests.Response:
+        body = resp.json()
+        links = self._links_map(body)
+        if "Next" not in links:
+            raise ValueError("No 'Next' link present")
+        return self._request_get(links["Next"])
+
+    def list_logs(self) -> list[LogDescriptor]:
+        """List available logs for the configured region.
+
+        Uses the Log Search management API:
+        `GET https://{region}.rest.logs.insight.rapid7.com/management/logs`
+
+        Returns:
+            A list of LogDescriptor(id, name).
+
+        Raises:
+            requests.HTTPError: on non-2xx responses.
+            ValueError: on unexpected response shapes.
+        """
+
+        base = f"https://{self.config.rapid7_data_storage_region}.rest.logs.insight.rapid7.com"
+        url = f"{base}/management/logs"
+
+        logger.info("logsearch_list_logs_request", region=self.config.rapid7_data_storage_region)
+
+        resp = self._request_get(url)
+        if resp.status_code == 429:
+            self._raise_rate_limited(resp)
+        resp.raise_for_status()
+
+        body = resp.json()
+        logs = body.get("logs")
+        if not isinstance(logs, list):
+            raise ValueError("Invalid Log Search response: missing or invalid 'logs' list")
+
+        out: list[LogDescriptor] = []
+        for item in logs:
+            if not isinstance(item, dict):
+                continue
+            log_id = item.get("id")
+            name = item.get("name")
+            if isinstance(log_id, str) and log_id and isinstance(name, str) and name:
+                out.append(LogDescriptor(id=log_id, name=name))
+
+        logger.info("logsearch_list_logs_complete", count=len(out))
+        return out
+
+    def list_log_sets(self) -> list[LogSetDescriptor]:
+        """List available log sets for the configured region.
+
+        Management endpoint:
+        `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets`
+
+        Notes:
+            Some Rapid7 environments include per-logset membership inline via a
+            `logs_info` array on each log set. When present, we parse it for use
+            by interactive selection flows.
+
+        Returns:
+            List of LogSetDescriptor(id, name, description)
+
+        Raises:
+            requests.HTTPError: on non-2xx responses.
+            ValueError: on unexpected response shapes.
+        """
+
+        base = f"https://{self.config.rapid7_data_storage_region}.rest.logs.insight.rapid7.com"
+        url = f"{base}/management/logsets"
+
+        logger.info(
+            "logsearch_list_log_sets_request",
+            region=self.config.rapid7_data_storage_region,
+        )
+
+        resp = self._request_get(url)
+        if resp.status_code == 429:
+            self._raise_rate_limited(resp)
+        resp.raise_for_status()
+
+        body = resp.json()
+        logsets = body.get("logsets")
+        if not isinstance(logsets, list):
+            raise ValueError("Invalid Log Search response: missing or invalid 'logsets' list")
+
+        out: list[LogSetDescriptor] = []
+        for item in logsets:
+            if not isinstance(item, dict):
+                continue
+            log_set_id = item.get("id")
+            name = item.get("name")
+            description = item.get("description")
+            if (
+                isinstance(log_set_id, str)
+                and log_set_id
+                and isinstance(name, str)
+                and name
+            ):
+                # Optional embedded membership list
+                logs_info = item.get("logs_info")
+                embedded_logs: list[LogDescriptor] = []
+                if isinstance(logs_info, list):
+                    for li in logs_info:
+                        if not isinstance(li, dict):
+                            continue
+                        log_id = li.get("id")
+                        log_name = li.get("name")
+                        if (
+                            isinstance(log_id, str)
+                            and log_id
+                            and isinstance(log_name, str)
+                            and log_name
+                        ):
+                            embedded_logs.append(LogDescriptor(id=log_id, name=log_name))
+
+                out.append(
+                    LogSetDescriptor(
+                        id=log_set_id,
+                        name=name,
+                        description=str(description) if description is not None else "",
+                        logs=embedded_logs,
+                    )
+                )
+
+        logger.info("logsearch_list_log_sets_complete", count=len(out))
+        return out
+
+    def list_logs_in_log_set(self, log_set_id: str) -> list[LogDescriptor]:
+        """List logs within a specific log set.
+
+        IMPORTANT (repo contract): In this repository's target Rapid7 environment,
+        log set membership is provided inline in the response returned by
+        `list_log_sets()` via a `logs_info` array.
+
+        The per-logset membership endpoints:
+        - `/management/logsets/{id}/logids`
+        - `/management/logsets/{id}/logs`
+        are not supported in this environment (often 404) and MUST NOT be used.
+
+        This method therefore fails loudly with actionable guidance.
+
+        Args:
+            log_set_id: Log set identifier.
+
+        Raises:
+            ValueError: always, with guidance to use `list_log_sets()` and embedded `logs_info`.
+        """
+
+        if not log_set_id or not str(log_set_id).strip():
+            raise ValueError("log_set_id is required")
+
+        raise ValueError(
+            "Per-logset membership endpoints are unsupported in this environment. "
+            "Use list_log_sets() and the embedded logs_info membership instead."
+        )
+
+    def fetch_logs(self, start_time: str, end_time: str) -> str:
+        """Fetch Log Search results for a time range.
+
+        Notes:
+            Provider expects from/to in epoch millis. For now we pass through and assume
+            caller already provides millis or API accepts ISO strings. If not, we’ll add
+            explicit conversion once the expected format is confirmed.
+        """
+
+        base = f"https://{self.config.rapid7_data_storage_region}.rest.logs.insight.rapid7.com"
+        url = f"{base}/query/logs/{self.config.rapid7_log_key}"
+
+        params = {
+            "from": start_time,
+            "to": end_time,
+            "query": self.config.rapid7_query,
+        }
+
+        logger.info(
+            "logsearch_query_submitted",
+            region=self.config.rapid7_data_storage_region,
+            log_key=self.config.rapid7_log_key,
+        )
+
+        def do_query() -> requests.Response:
+            resp = self._request_get(url, params=params)
+            if resp.status_code == 429:
+                self._raise_rate_limited(resp)
+            resp.raise_for_status()
+            return resp
+
+        attempts = 0
+        while True:
+            try:
+                resp = do_query()
+                break
+            except RateLimitedException as e:
+                attempts += 1
+                logger.warning("logsearch_rate_limited", secs_until_reset=e.secs_until_reset)
+                time.sleep(e.secs_until_reset)
+                if attempts > self.config.retry_attempts:
+                    raise
+
+        page_resp = self._poll_request_to_completion(resp)
+        pages: list[dict[str, Any]] = []
+
+        body = page_resp.json()
+        pages.append(body)
+
+        while self._has_next_page(body):
+            next_resp = self._poll_request_to_completion(self._get_next_page(page_resp))
+            page_resp = next_resp
+            body = page_resp.json()
+            pages.append(body)
+
+        aggregated: dict[str, Any] = {
+            "pages": pages,
+        }
+        return json.dumps(aggregated)

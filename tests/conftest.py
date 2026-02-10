@@ -35,8 +35,12 @@ def test_config(temp_dir, monkeypatch):
     """
     # Set required environment variables
     monkeypatch.setenv("RAPID7_API_KEY", "test-api-key-12345")
-    monkeypatch.setenv("RAPID7_API_ENDPOINT", "https://api.test.rapid7.com")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "test-log-key")
     monkeypatch.setenv("OUTPUT_DIR", str(temp_dir))
+
+    # Optional provider settings
+    monkeypatch.setenv("RAPID7_DATA_STORAGE_REGION", "eu")
+    monkeypatch.setenv("RAPID7_QUERY", "")
 
     # Optional settings with test values
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
