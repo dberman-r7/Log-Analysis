@@ -1,0 +1,464 @@
+# Architecture Diagrams: Log Ingestion Service
+
+This document contains Mermaid.js diagrams for the Rapid7 InsightOps Log Ingestion Service.
+
+---
+
+## System Context Diagram
+
+Shows the service in context with external systems.
+
+```mermaid
+graph TB
+    User[Analytics Team]
+    Service[Log Ingestion Service]
+    API[Rapid7 InsightOps API]
+    Storage[(File System<br/>Parquet Files)]
+    AnalysisTools[Analytics Tools<br/>Pandas/Spark/DuckDB]
+    
+    User -->|Configure & Run| Service
+    Service -->|Fetch Logs<br/>HTTP/REST| API
+    Service -->|Write| Storage
+    AnalysisTools -->|Query| Storage
+    User -->|Analyze| AnalysisTools
+    
+    style Service fill:#4A90E2,color:#fff
+    style API fill:#E94B3C,color:#fff
+    style Storage fill:#50C878,color:#fff
+```
+
+---
+
+## Component Diagram
+
+Shows internal components and their relationships.
+
+```mermaid
+graph TB
+    subgraph "Log Ingestion Service"
+        Main[Main Orchestrator<br/>main.py]
+        Config[Configuration<br/>config.py]
+        API[API Client<br/>api_client.py]
+        Parser[CSV Parser<br/>parser.py]
+        Writer[Parquet Writer<br/>parquet_writer.py]
+        Logger[Structured Logger<br/>structlog]
+        
+        Main --> Config
+        Main --> API
+        Main --> Parser
+        Main --> Writer
+        Main --> Logger
+        
+        API --> Logger
+        Parser --> Logger
+        Writer --> Logger
+    end
+    
+    External[Rapid7 API]
+    Files[(Parquet Files)]
+    Env[Environment Variables<br/>.env]
+    
+    Config -.->|Loads| Env
+    API -->|HTTP Requests| External
+    Writer -->|Writes| Files
+    
+    style Main fill:#4A90E2,color:#fff
+    style Config fill:#F5A623,color:#fff
+    style API fill:#50C878,color:#fff
+    style Parser fill:#9013FE,color:#fff
+    style Writer fill:#E94B3C,color:#fff
+```
+
+---
+
+## Data Flow Diagram
+
+Shows how data flows through the system.
+
+```mermaid
+sequenceDiagram
+    participant Main
+    participant Config
+    participant APIClient
+    participant Rapid7
+    participant Parser
+    participant Writer
+    participant FileSystem
+    participant Logger
+    
+    Main->>Config: Load configuration
+    Config-->>Main: Configuration object
+    
+    Main->>APIClient: Initialize with config
+    Main->>Parser: Initialize parser
+    Main->>Writer: Initialize writer
+    
+    loop For each batch
+        Main->>APIClient: fetch_logs(start, end)
+        APIClient->>Rapid7: GET /logs (with auth)
+        Rapid7-->>APIClient: JSON response
+        APIClient->>Logger: Log API metrics
+        APIClient-->>Main: Log data (JSON/CSV)
+        
+        Main->>Parser: parse(csv_data)
+        Parser->>Parser: Detect schema
+        Parser->>Parser: Parse to DataFrame
+        Parser->>Logger: Log parse metrics
+        Parser-->>Main: DataFrame
+        
+        Main->>Writer: write(dataframe, partition)
+        Writer->>Writer: Convert to Parquet schema
+        Writer->>Writer: Apply compression
+        Writer->>FileSystem: Write .parquet file
+        Writer->>Logger: Log write metrics
+        Writer-->>Main: File path
+        
+        Main->>Logger: Log batch completion
+    end
+    
+    Main->>Logger: Log service completion
+```
+
+---
+
+## Deployment Diagram
+
+Shows how the service is deployed and interacts with infrastructure.
+
+```mermaid
+graph TB
+    subgraph "Runtime Environment"
+        subgraph "Process"
+            Service[Log Ingestion Service<br/>Python Process]
+        end
+        
+        subgraph "File System"
+            Env[.env file<br/>Configuration]
+            Output[Output Directory<br/>*.parquet files]
+            Logs[Log Files<br/>JSON logs]
+        end
+        
+        Service -->|Read| Env
+        Service -->|Write| Output
+        Service -->|Write| Logs
+    end
+    
+    subgraph "External"
+        API[Rapid7 InsightOps API<br/>HTTPS]
+    end
+    
+    subgraph "Monitoring"
+        LogAgg[Log Aggregation<br/>ELK/Splunk]
+        Metrics[Metrics<br/>Prometheus]
+    end
+    
+    Service -->|HTTPS| API
+    Logs -->|Ingest| LogAgg
+    Service -.->|Expose| Metrics
+    
+    style Service fill:#4A90E2,color:#fff
+    style API fill:#E94B3C,color:#fff
+    style Output fill:#50C878,color:#fff
+```
+
+---
+
+## Class Diagram
+
+Shows the main classes and their relationships.
+
+```mermaid
+classDiagram
+    class LogIngestionConfig {
+        +str rapid7_api_key
+        +HttpUrl rapid7_api_endpoint
+        +Path output_dir
+        +str log_level
+        +int batch_size
+        +int rate_limit
+        +int retry_attempts
+        +str parquet_compression
+    }
+    
+    class Rapid7ApiClient {
+        -LogIngestionConfig config
+        -Session session
+        +fetch_logs(start_time, end_time) dict
+        -_retry_with_backoff()
+        -_check_rate_limit()
+    }
+    
+    class LogParser {
+        -dict schema
+        +detect_schema(csv_data) dict
+        +parse(csv_data) DataFrame
+        -_infer_types(data)
+    }
+    
+    class ParquetWriter {
+        -LogIngestionConfig config
+        -Path output_dir
+        +write(dataframe, partition_date) Path
+        -_create_schema(dataframe)
+        -_apply_compression()
+    }
+    
+    class Main {
+        +run()
+        -_signal_handler()
+        -_process_batch()
+    }
+    
+    Main --> LogIngestionConfig
+    Main --> Rapid7ApiClient
+    Main --> LogParser
+    Main --> ParquetWriter
+    
+    Rapid7ApiClient --> LogIngestionConfig
+    ParquetWriter --> LogIngestionConfig
+```
+
+---
+
+## State Diagram
+
+Shows the service lifecycle and states.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Initializing
+    Initializing --> Configured: Load Config
+    Configured --> Authenticated: API Auth
+    Authenticated --> Fetching: Start Loop
+    
+    Fetching --> Parsing: Logs Retrieved
+    Parsing --> Writing: Data Parsed
+    Writing --> Fetching: File Written
+    
+    Fetching --> Error: API Error
+    Parsing --> Error: Parse Error
+    Writing --> Error: Write Error
+    
+    Error --> Retrying: Retry Logic
+    Retrying --> Fetching: Retry Success
+    Retrying --> Failed: Max Retries
+    
+    Fetching --> Completed: No More Data
+    Failed --> [*]
+    Completed --> [*]
+    
+    state Fetching {
+        [*] --> CheckRateLimit
+        CheckRateLimit --> CallAPI
+        CallAPI --> ProcessResponse
+        ProcessResponse --> [*]
+    }
+```
+
+---
+
+## Error Handling Flow
+
+Shows how errors are handled throughout the system.
+
+```mermaid
+flowchart TD
+    Start([Start Batch Processing])
+    
+    FetchLogs[Fetch Logs from API]
+    ParseData[Parse CSV Data]
+    WriteParquet[Write Parquet File]
+    
+    Start --> FetchLogs
+    
+    FetchLogs -->|Success| ParseData
+    FetchLogs -->|401/403| AuthError[Authentication Error]
+    FetchLogs -->|429| RateLimit[Rate Limit Hit]
+    FetchLogs -->|500| ServerError[Server Error]
+    FetchLogs -->|Timeout| Timeout[Request Timeout]
+    
+    AuthError --> Fatal[Fatal Error - Exit]
+    RateLimit --> Backoff[Exponential Backoff]
+    ServerError --> Retry{Retry < Max?}
+    Timeout --> Retry
+    
+    Backoff --> Wait[Wait & Retry]
+    Wait --> FetchLogs
+    
+    Retry -->|Yes| FetchLogs
+    Retry -->|No| Fatal
+    
+    ParseData -->|Success| WriteParquet
+    ParseData -->|Schema Error| LogError[Log Error & Skip]
+    ParseData -->|Data Error| LogError
+    
+    WriteParquet -->|Success| Success([Batch Complete])
+    WriteParquet -->|Disk Full| Fatal
+    WriteParquet -->|Permission| Fatal
+    WriteParquet -->|Corruption| LogError
+    
+    LogError --> Success
+    
+    style Fatal fill:#E94B3C,color:#fff
+    style Success fill:#50C878,color:#fff
+    style Backoff fill:#F5A623,color:#fff
+```
+
+---
+
+## Metrics & Monitoring Flow
+
+Shows what metrics are collected and how.
+
+```mermaid
+graph LR
+    subgraph "Service Components"
+        API[API Client]
+        Parser[Parser]
+        Writer[Writer]
+    end
+    
+    subgraph "Metrics"
+        APIMetrics[api_calls_total<br/>api_call_duration_seconds<br/>api_errors_total]
+        ParseMetrics[parse_operations_total<br/>parse_errors_total<br/>records_parsed_total]
+        WriteMetrics[files_written_total<br/>bytes_written_total<br/>compression_ratio]
+    end
+    
+    subgraph "Logs"
+        StructLog[Structured JSON Logs<br/>trace_id<br/>request_id<br/>timestamp]
+    end
+    
+    subgraph "Aggregation"
+        Prometheus[Prometheus<br/>Metrics Collection]
+        ELK[ELK Stack<br/>Log Aggregation]
+    end
+    
+    subgraph "Visualization"
+        Grafana[Grafana<br/>Dashboards]
+        Kibana[Kibana<br/>Log Search]
+    end
+    
+    API --> APIMetrics
+    Parser --> ParseMetrics
+    Writer --> WriteMetrics
+    
+    API --> StructLog
+    Parser --> StructLog
+    Writer --> StructLog
+    
+    APIMetrics --> Prometheus
+    ParseMetrics --> Prometheus
+    WriteMetrics --> Prometheus
+    
+    StructLog --> ELK
+    
+    Prometheus --> Grafana
+    ELK --> Kibana
+```
+
+---
+
+## File Organization
+
+Shows how Parquet files are organized in the file system.
+
+```mermaid
+graph TB
+    Root[Output Directory<br/>/data/logs/]
+    
+    Year1[2026/]
+    Month1[02/]
+    Day1[10/]
+    
+    Hour1[logs_2026-02-10_00.parquet]
+    Hour2[logs_2026-02-10_01.parquet]
+    Hour3[logs_2026-02-10_02.parquet]
+    Metadata1[_metadata]
+    
+    Root --> Year1
+    Year1 --> Month1
+    Month1 --> Day1
+    Day1 --> Hour1
+    Day1 --> Hour2
+    Day1 --> Hour3
+    Day1 --> Metadata1
+    
+    style Root fill:#4A90E2,color:#fff
+    style Year1 fill:#50C878,color:#fff
+    style Month1 fill:#50C878,color:#fff
+    style Day1 fill:#50C878,color:#fff
+    style Hour1 fill:#F5A623,color:#000
+    style Hour2 fill:#F5A623,color:#000
+    style Hour3 fill:#F5A623,color:#000
+```
+
+---
+
+## Configuration Flow
+
+Shows how configuration is loaded and validated.
+
+```mermaid
+flowchart TD
+    Start([Service Start])
+    
+    LoadEnv[Load .env file<br/>python-dotenv]
+    ReadSysEnv[Read System Environment Variables]
+    
+    CreateConfig[Create LogIngestionConfig<br/>Pydantic Model]
+    
+    Validate{Validation}
+    
+    ValidateURL[Validate API URL<br/>Must be valid HTTP/HTTPS]
+    ValidateKey[Validate API Key<br/>Must not be empty]
+    ValidatePath[Validate Output Path<br/>Must be writable directory]
+    ValidateInt[Validate Integers<br/>batch_size, rate_limit, etc.]
+    
+    ConfigReady[Configuration Ready]
+    Error([Validation Error - Exit])
+    
+    Start --> LoadEnv
+    LoadEnv --> ReadSysEnv
+    ReadSysEnv --> CreateConfig
+    
+    CreateConfig --> Validate
+    
+    Validate -->|Required Fields| ValidateKey
+    ValidateKey -->|Pass| ValidateURL
+    ValidateURL -->|Pass| ValidatePath
+    ValidatePath -->|Pass| ValidateInt
+    ValidateInt -->|Pass| ConfigReady
+    
+    ValidateKey -->|Fail| Error
+    ValidateURL -->|Fail| Error
+    ValidatePath -->|Fail| Error
+    ValidateInt -->|Fail| Error
+    
+    style ConfigReady fill:#50C878,color:#fff
+    style Error fill:#E94B3C,color:#fff
+```
+
+---
+
+## Diagram Legend
+
+### Colors
+- **Blue** (#4A90E2): Main service components
+- **Red** (#E94B3C): External APIs, errors, failures
+- **Green** (#50C878): Success states, storage, completion
+- **Orange** (#F5A623): Configuration, warnings, intermediate states
+- **Purple** (#9013FE): Data processing, transformations
+
+### Symbols
+- **Rectangles**: Processes/Components
+- **Cylinders**: Storage/Databases
+- **Rounded Rectangles**: States/Actors
+- **Diamonds**: Decision Points
+- **Arrows**: Data Flow/Control Flow
+- **Dotted Lines**: Optional/Configuration
+
+---
+
+**Document Version**: 1.0  
+**Created**: 2026-02-10  
+**Related**: CR-2026-02-10-001, ADR-0001
