@@ -1,6 +1,6 @@
 # Change Management Process
 
-> **Version:** 1.1.1  
+> **Version:** 1.1.3  
 > **Last Updated:** 2026-02-11  
 > **Owner:** Systems Architecture Team
 
@@ -15,7 +15,7 @@ Changes fall into two buckets:
 1. **Governed Changes (CR-required)**: higher-risk or higher-blast-radius changes that must use the full Change Management Loop (CR → IA → Implementation Plan → ATP).
 2. **Standard Changes (CR-not-required)**: routine changes that still require a feature branch + PR, TDD (where applicable), and documentation/RTM updates as needed.
 
-This keeps governance strict where it matters, without creating process overhead for routine maintenance.
+**Key idea:** The CR process is intentionally *not* used for every change. It exists when there is a **major change in requirements or approach** with meaningful impact.
 
 ---
 
@@ -40,14 +40,17 @@ A Change Request (CR) **is required** when the change meets **any** of these tri
 
 ### CR-Not-Required (Standard Change Path)
 
-A CR is **not required** for the following, as long as the change does **not** trigger any CR-required criteria above:
+A CR is **not required** for the following, **as long as** the change does **not** trigger any CR-required criteria above:
 
 - **Bug fixes** that correct behavior already covered by existing requirements.
 - **Clarifications** that improve wording, comments, doc clarity, or test clarity **without** changing requirements.
 - **Minor refactors** that preserve behavior (no public API changes, no architecture shift).
-- **Additive new features** that do not change existing REQ-IDs and do not materially impact existing workflows.
+- **Additive new features** that **do not change existing REQ-IDs** and have **low impact** on existing workflows.
 
-> Important: Even when a CR isn’t required, the “No Ghost Code” rule still applies.
+> New features are **not automatically** CR-worthy.
+> Only use a CR if the feature forces requirement changes, introduces breaking behavior, or carries major security/performance/architecture impact.
+
+> Even when a CR isn’t required, the “No Ghost Code” rule still applies:
 > - If you introduce **new behavior**, it must be traceable to an existing REQ-ID or a newly added REQ-ID (PROPOSED).
 > - If you only fix a bug under an existing REQ-ID, do **not** open a CR — update tests and (if necessary) RTM trace links.
 
@@ -67,6 +70,10 @@ For CR-not-required changes, follow this lightweight loop:
    - Update RTM rows/links when traceability or implementation references change.
 5. **Validation**
    - Tests, lint, format, and security checks.
+
+**PR title convention (no CR):**
+- Prefer `[REQ-XXX] …` when implementing a specific requirement.
+- Use `[BUG] …` for bug fixes that don’t introduce new requirements.
 
 ---
 
