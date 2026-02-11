@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 import pyarrow.parquet as pq
+import pytest
 
 
 def test_writer_creates_parquet_schema():
@@ -319,3 +320,28 @@ def test_writer_creates_output_directory():
         assert output_file.exists()
         # File should be in YYYY/MM/DD subdirectory structure
         assert str(output_path) in str(output_file.parent)
+
+
+def test_parquet_writer_fails_loudly_when_output_dir_unwritable(monkeypatch):
+    """REQ-022: fail loudly with actionable guidance when output dir can't be created."""
+    from src.log_ingestion.parquet_writer import ParquetWriter
+
+    class _Config:
+        output_dir = Path("/data/logs")
+        parquet_compression = "snappy"
+
+    def _raise(*args, **kwargs):
+        raise OSError("read-only file system")
+
+    # Patch the class method used by ParquetWriter.__init__. We cannot patch
+    # methods on a concrete PosixPath instance because it's implemented in C
+    # and treated as read-only by setattr.
+    monkeypatch.setattr(Path, "mkdir", _raise)
+
+    with pytest.raises(OSError) as excinfo:
+        ParquetWriter(_Config())
+
+    msg = str(excinfo.value)
+    assert "OUTPUT_DIR" in msg
+    assert "writable" in msg
+

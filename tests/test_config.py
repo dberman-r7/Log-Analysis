@@ -34,7 +34,7 @@ def test_config_loads_from_environment(monkeypatch):
 def test_config_validates_required_fields():
     """Test that missing required fields raise validation error"""
     # Clear any environment variables that might be set
-    for key in ["RAPID7_API_KEY", "RAPID7_LOG_KEY", "OUTPUT_DIR"]:
+    for key in ["RAPID7_API_KEY", "RAPID7_LOG_KEY"]:
         os.environ.pop(key, None)
 
     # Act & Assert
@@ -142,3 +142,22 @@ def test_config_output_dir_as_path(monkeypatch):
     # Assert
     assert isinstance(config.output_dir, Path)
     assert config.output_dir == Path("/tmp/test_output")
+
+
+def test_config_defaults_output_dir_when_not_set(monkeypatch, tmp_path):
+    """REQ-021: OUTPUT_DIR should be optional with a writable default."""
+    # Arrange
+    monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
+    monkeypatch.delenv("OUTPUT_DIR", raising=False)
+
+    # Act
+    from src.log_ingestion.config import LogIngestionConfig
+
+    config = LogIngestionConfig()
+
+    # Assert
+    assert isinstance(config.output_dir, Path)
+    # Should be a relative directory (repo-local) by default.
+    assert not config.output_dir.is_absolute()
+

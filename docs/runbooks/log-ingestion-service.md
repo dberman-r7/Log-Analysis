@@ -79,7 +79,9 @@ Required variables for a real ingestion run:
 - `RAPID7_API_KEY`
 - `RAPID7_DATA_STORAGE_REGION`
 - `RAPID7_LOG_KEY`
-- `OUTPUT_DIR`
+
+Optional:
+- `OUTPUT_DIR` (defaults to `./data/logs`)
 
 Optional variables:
 - `RAPID7_QUERY`
@@ -151,7 +153,9 @@ python3 -c "from src.log_ingestion.config import LogIngestionConfig; print(LogIn
 | `RAPID7_API_KEY` | API authentication key (sent as `x-api-key`) | `abc123...` | ✅ Yes |
 | `RAPID7_DATA_STORAGE_REGION` | Rapid7 data storage region used to construct the Log Search base URL | `us` | ✅ Yes |
 | `RAPID7_LOG_KEY` | Log key used in the Log Search endpoint path | `your-log-key` | ✅ Yes |
-| `OUTPUT_DIR` | Directory for Parquet files | `/data/logs` | ✅ Yes |
+
+Optional:
+- `OUTPUT_DIR` (defaults to `./data/logs`)
 
 ### Optional Environment Variables
 
@@ -171,7 +175,9 @@ python3 -c "from src.log_ingestion.config import LogIngestionConfig; print(LogIn
 RAPID7_API_KEY=your_api_key_here
 RAPID7_DATA_STORAGE_REGION=us
 RAPID7_LOG_KEY=your_log_key_here
-OUTPUT_DIR=/data/logs
+
+# Optional (defaults to ./data/logs)
+OUTPUT_DIR=./data/logs
 
 # Optional
 RAPID7_QUERY=where(message contains \"error\")
@@ -185,6 +191,9 @@ PARQUET_COMPRESSION=snappy
 **Important**:
 - Never commit `.env` to git.
 - Don’t hardcode API keys in scripts or shell history. Prefer loading from `.env` or your secret manager.
+
+> Note (macOS/dev): `OUTPUT_DIR` now defaults to `./data/logs` to avoid writing to read-only paths like `/data`.
+> You can still override it (for example, `OUTPUT_DIR=/tmp/logs`).
 
 ---
 
@@ -846,11 +855,9 @@ python3 -m src.log_ingestion.main \
 
 Notes:
  - `--start-time/--end-time` are still required by the CLI parser, but are ignored when `--select-log` is provided.
- - The helper calls the Log Search management endpoints:
+ - The helper calls:
    - `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets`
-   - `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets/{logSetId}/logs`
- - Auth is sent as `x-api-key: $RAPID7_API_KEY`.
- - The `.env` file is updated in-place (comments and unrelated variables are preserved).
+ - It resolves log membership from embedded `logs_info` in the logsets response (no per-logset membership endpoints).
 
 Failure modes:
  - **401/403**: API key invalid or lacks access. Confirm `RAPID7_API_KEY`.
