@@ -41,7 +41,7 @@ docs/
 ### Must-Read Documents
 
 1. **[Copilot Instructions](../.github/copilot-instructions.md)**: The governance framework that governs all AI interactions
-2. **[Change Management Process](./processes/change-management.md)**: How to request and implement changes
+2. **[Change Management Process](./processes/change-management.md)**: When CRs are required vs the standard (no-CR) path
 3. **[Definition of Done](./processes/definition-of-done.md)**: Checklist for completing work
 4. **[RTM](./requirements/rtm.md)**: Single source of truth for requirements
 
@@ -61,24 +61,24 @@ docs/
 1. Read [Change Management Process](./processes/change-management.md)
 2. Review [Definition of Done](./processes/definition-of-done.md)
 3. Check [RTM](./requirements/rtm.md) for existing requirements
-4. Review relevant [ADRs](./arch/adr/)
+4. Review relevant [ADRs](./arch/adr/0001-log-ingestion-tech-stack.md)
 
 **During Development**:
 1. Follow TDD (Red-Green-Refactor)
 2. Update [RTM](./requirements/rtm.md) with new requirements
-3. Create [ADR](./arch/adr/) if making architectural decisions
-4. Update diagrams in [diagrams/](./arch/diagrams/) if needed
+3. Create an [ADR](./arch/adr/0001-log-ingestion-tech-stack.md) if making architectural decisions
+4. Update diagrams in [`docs/arch/diagrams/`](./arch/diagrams/) if needed
 
 **Before Creating PR**:
 1. Complete [Definition of Done](./processes/definition-of-done.md) checklist
-2. Use [PR template](../.github/pull_request_template.md)
-3. Link to Change Request in [change-requests/](./processes/change-requests/)
+2. Use the [PR template](../.github/pull_request_template.md)
+3. Link to a Change Request (only if this change is CR-required)
 
 ### For Architects
 
 **Key Responsibilities**:
-1. Review and approve [ADRs](./arch/adr/)
-2. Maintain [architecture diagrams](./arch/diagrams/)
+1. Review and approve [ADRs](./arch/adr/0001-log-ingestion-tech-stack.md)
+2. Maintain [architecture diagrams](./arch/diagrams/log-ingestion.mmd)
 3. Ensure [RTM](./requirements/rtm.md) reflects system design
 4. Review [Technical Debt Log](./processes/tech-debt.md) quarterly
 
@@ -92,7 +92,7 @@ docs/
 
 **Key Documents**:
 1. [RTM](./requirements/rtm.md): Track feature requirements
-2. [Change Requests](./processes/change-requests/): Review pending changes
+2. [Change Requests](./processes/change-requests/CR-2026-02-10-001.md): Review pending changes
 3. [SLOs](./requirements/slos.md): Monitor system reliability
 4. [Technical Debt Log](./processes/tech-debt.md): Understand technical constraints
 
@@ -106,7 +106,7 @@ docs/
 
 **Key Documents**:
 1. [SLOs](./requirements/slos.md): Service level objectives
-2. [Runbooks](./runbooks/): Operational procedures
+2. [Runbooks](./runbooks/log-ingestion-service.md): Operational procedures
 3. [Technical Debt Log](./processes/tech-debt.md): Known system issues
 
 **Operational Tasks**:
@@ -244,16 +244,11 @@ Use relative paths for internal links:
 
 ## Contributing to Documentation
 
-All documentation changes follow the same governance process as code:
+All documentation changes go through the same **feature branch + PR** workflow as code.
 
-1. Create Change Request
-2. Get approval (ATP)
-3. Make changes
-4. Update RTM if needed
-5. Create PR with DoD checklist
-6. Get review and merge
+- **CRs are conditional**: only required when the doc change reflects a major requirement/approach shift (see `docs/processes/change-management.md`).
 
-**Note**: Documentation is code. Treat it with the same rigor.
+Typical doc-only changes (typos, clarifications, formatting) do not require a CR.
 
 ---
 

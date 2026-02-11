@@ -281,3 +281,33 @@ def test_service_logs_pipeline_events():
                 assert "service_initialized" in call_args or any(
                     "initialized" in str(arg) for arg in call_args
                 )
+
+
+def test_service_converts_iso8601_to_epoch_millis_for_api_client():
+    """REQ-023: Service must convert ISO8601 inputs to epoch-millis for the Log Search query endpoint."""
+    from src.log_ingestion.config import LogIngestionConfig
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = LogIngestionConfig(
+            rapid7_api_key="test_key",
+            rapid7_log_key="test-log-key",
+            output_dir=tmpdir,
+        )
+
+        # Minimal CSV for the pipeline to proceed.
+        csv_response = "timestamp,level,message\n2026-02-10T00:00:00Z,INFO,ok\n"
+
+        from src.log_ingestion.service import LogIngestionService
+
+        with patch("src.log_ingestion.service.Rapid7ApiClient.fetch_logs") as mock_fetch:
+            mock_fetch.return_value = csv_response
+
+            service = LogIngestionService(config)
+            service.run(start_time="2026-02-10T00:00:00Z", end_time="2026-02-10T01:00:00Z")
+
+        # Assert: service called API with epoch-millis strings.
+        called_start, called_end = mock_fetch.call_args[0]
+        assert called_start.isdigit()
+        assert called_end.isdigit()
+        assert int(called_end) > int(called_start)
+

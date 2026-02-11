@@ -158,7 +158,7 @@ def test_api_client_handles_401_unauthorized():
 
 
 def test_api_client_handles_429_rate_limit():
-    """Handle 429 using X-RateLimit-Reset and retry"""
+    """Handle 429 using Retry-After/X-RateLimit-Reset and retry"""
     from src.log_ingestion.config import LogIngestionConfig
 
     config = LogIngestionConfig(
@@ -170,7 +170,7 @@ def test_api_client_handles_429_rate_limit():
 
     rate_limited = Mock()
     rate_limited.status_code = 429
-    rate_limited.headers = {"X-RateLimit-Reset": "1"}
+    rate_limited.headers = {"Retry-After": "2", "X-RateLimit-Reset": "99"}
 
     completed = Mock()
     completed.status_code = 200
@@ -182,10 +182,11 @@ def test_api_client_handles_429_rate_limit():
     with patch("requests.Session.get") as mock_get, patch("time.sleep") as mock_sleep:
         mock_get.side_effect = [rate_limited, completed]
         client = Rapid7ApiClient(config)
-        result = client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
+        result = client.fetch_logs("1700000000000", "1700000001000")
 
     assert mock_get.call_count == 2
-    mock_sleep.assert_called()
+    # The client may also sleep briefly due to its own per-minute rate limiting; ensure we slept for the Retry-After duration.
+    assert any(call.args == (2,) for call in mock_sleep.call_args_list)
     assert "events" in result
 
 
@@ -290,3 +291,54 @@ def test_api_client_list_logs_in_log_set_success():
             client.list_logs_in_log_set("ls-1")
 
     assert "logs_info" in str(exc.value)
+
+
+def test_api_client_query_404_logs_actionable_guidance(capsys):
+    """REQ-010/NFR-REL: Fail loudly with actionable guidance on 404 query endpoint."""
+    from unittest.mock import ANY, Mock, patch
+
+    import requests
+
+    from src.log_ingestion.api_client import Rapid7ApiClient
+    from src.log_ingestion.config import LogIngestionConfig
+
+    config = LogIngestionConfig(
+        rapid7_api_key="test_key",
+        rapid7_log_key="logkey_404",
+        output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
+        rapid7_query="",
+    )
+
+    resp = Mock()
+    resp.status_code = 404
+
+    http_error = requests.exceptions.HTTPError("404 Not Found")
+    http_error.response = resp
+    resp.raise_for_status.side_effect = http_error
+
+    with patch("requests.Session.get", return_value=resp), patch(
+        "src.log_ingestion.api_client.logger"
+    ) as mock_logger:
+        client = Rapid7ApiClient(config)
+        with pytest.raises(requests.exceptions.HTTPError):
+            client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
+
+    # We should emit a structured error event with actionable guidance.
+    mock_logger.error.assert_any_call(
+        "logsearch_query_endpoint_not_found",
+        url="https://eu.rest.logs.insight.rapid7.com/query/logs/logkey_404",
+        region="eu",
+        log_key="logkey_404",
+        guidance=ANY,
+    )
+
+    guidance_values = [
+        call.kwargs.get("guidance")
+        for call in mock_logger.error.call_args_list
+        if call.args and call.args[0] == "logsearch_query_endpoint_not_found"
+    ]
+    assert guidance_values, "Expected logsearch_query_endpoint_not_found event"
+    assert isinstance(guidance_values[-1], str)
+    assert "region" in guidance_values[-1].lower()
+    assert "log" in guidance_values[-1].lower()

@@ -1,25 +1,88 @@
 # Change Management Process
 
-> **Version:** 1.0.0  
-> **Last Updated:** 2026-02-09  
+> **Version:** 1.1.1  
+> **Last Updated:** 2026-02-11  
 > **Owner:** Systems Architecture Team
 
-This document defines the formal Change Management Loop that must be followed for all modifications to the system.
+This document defines the formal Change Management process used in this repository.
 
 ---
 
 ## Overview
 
-Every change to the system, no matter how small, must go through a structured process to ensure:
-- Changes are well-understood before implementation
-- Impact is assessed and risks are mitigated
-- Documentation stays synchronized with code
-- Quality standards are maintained
-- Stakeholders are informed
+Changes fall into two buckets:
+
+1. **Governed Changes (CR-required)**: higher-risk or higher-blast-radius changes that must use the full Change Management Loop (CR → IA → Implementation Plan → ATP).
+2. **Standard Changes (CR-not-required)**: routine changes that still require a feature branch + PR, TDD (where applicable), and documentation/RTM updates as needed.
+
+This keeps governance strict where it matters, without creating process overhead for routine maintenance.
 
 ---
 
-## The Change Management Loop
+## Change Types & When a CR is Required
+
+### CR-Required (use the full Change Management Loop)
+
+A Change Request (CR) **is required** when the change meets **any** of these triggers:
+
+- **Requirements change**: adds/modifies/deprecates existing REQ-IDs in the RTM.
+- **Major approach change**: substantially changes how an existing requirement is implemented (new workflow, new data model, new integration contract), even if the REQ text stays the same.
+- **Architecture change**: crosses component boundaries, introduces new components, or is ADR-worthy.
+- **Security-impacting change**: authentication/authorization, data exposure, secret handling, encryption, or compliance scope changes.
+- **Performance/SLO-impacting change**: could materially affect latency, throughput, memory/CPU, storage growth, or rate limits.
+- **Breaking change**: any user-facing or API-breaking behavior.
+- **Large blast radius**: touchpoints across many modules, high regression risk, or complex rollout/rollback.
+
+#### Examples (CR required)
+- Replacing the ingestion storage format (CSV → Parquet) across the pipeline.
+- Changing query pagination strategy in a way that affects results correctness.
+- Adding a new external integration or new authentication mechanism.
+
+### CR-Not-Required (Standard Change Path)
+
+A CR is **not required** for the following, as long as the change does **not** trigger any CR-required criteria above:
+
+- **Bug fixes** that correct behavior already covered by existing requirements.
+- **Clarifications** that improve wording, comments, doc clarity, or test clarity **without** changing requirements.
+- **Minor refactors** that preserve behavior (no public API changes, no architecture shift).
+- **Additive new features** that do not change existing REQ-IDs and do not materially impact existing workflows.
+
+> Important: Even when a CR isn’t required, the “No Ghost Code” rule still applies.
+> - If you introduce **new behavior**, it must be traceable to an existing REQ-ID or a newly added REQ-ID (PROPOSED).
+> - If you only fix a bug under an existing REQ-ID, do **not** open a CR — update tests and (if necessary) RTM trace links.
+
+---
+
+## Standard Change Path (No CR)
+
+For CR-not-required changes, follow this lightweight loop:
+
+1. **Confirm requirement traceability**
+   - Map the work to an existing REQ-ID, or add a new REQ-ID (PROPOSED) if the change introduces new behavior.
+2. **Implement via feature branch + PR** (mandatory)
+   - Use branch naming: `feat/REQ-XXX-...` or `fix/Issue-NNN-...`.
+3. **TDD** (where code changes are involved)
+   - Red → Green → Refactor.
+4. **Update docs as needed**
+   - Update RTM rows/links when traceability or implementation references change.
+5. **Validation**
+   - Tests, lint, format, and security checks.
+
+---
+
+## Mandatory Rule: All Changes Go Through a Feature Branch & Pull Request
+
+Direct edits on `main` are not allowed.
+
+- Create a **feature branch** for every change.
+- Open a **pull request** for every change.
+- Meet the Definition of Done.
+
+> Recommended enforcement: enable GitHub branch protection to block direct pushes to `main` and require PR approvals.
+
+---
+
+## The Change Management Loop (CR-Required)
 
 ```mermaid
 graph TD
@@ -816,4 +879,4 @@ Review metrics quarterly to improve process.
 
 ---
 
-**End of Change Management Process v1.0.0**
+**End of Change Management Process v1.1.0**

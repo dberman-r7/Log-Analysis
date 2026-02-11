@@ -64,6 +64,19 @@ class LogIngestionService:
             output_dir=str(config.output_dir),
         )
 
+    @staticmethod
+    def _iso8601_to_epoch_millis(ts: str) -> str:
+        """Convert ISO8601 timestamp to epoch milliseconds (as a string).
+
+        Accepts timestamps ending with 'Z' and offsets (e.g., +00:00).
+        Raises ValueError on invalid inputs.
+        """
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        # Ensure timezone-aware.
+        if dt.tzinfo is None:
+            raise ValueError("Timestamp must include timezone information")
+        return str(int(dt.timestamp() * 1000))
+
     def run(
         self, start_time: str, end_time: str, partition_date: Optional[str] = None
     ) -> dict[str, Any]:
@@ -95,17 +108,25 @@ class LogIngestionService:
         """
         pipeline_start = datetime.now()
 
+        # Convert ISO8601 -> epoch millis for Rapid7 query endpoint.
+        start_time_millis = self._iso8601_to_epoch_millis(start_time)
+        end_time_millis = self._iso8601_to_epoch_millis(end_time)
+        if int(end_time_millis) <= int(start_time_millis):
+            raise ValueError("end_time must be after start_time")
+
         logger.info(
             "pipeline_start",
             start_time=start_time,
             end_time=end_time,
+            start_time_millis=start_time_millis,
+            end_time_millis=end_time_millis,
             partition_date=partition_date,
         )
 
         try:
             # Step 1: Fetch logs from API
             logger.info("pipeline_step_fetch", step=1)
-            csv_data = self.api_client.fetch_logs(start_time, end_time)
+            csv_data = self.api_client.fetch_logs(start_time_millis, end_time_millis)
 
             # Step 2: Parse CSV data
             logger.info("pipeline_step_parse", step=2)

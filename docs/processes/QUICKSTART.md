@@ -10,23 +10,22 @@ This is your TL;DR guide to working in this repository. For complete details, se
 
 ### Before You Start ANY Work
 
-1. **Read**: [`.github/copilot-instructions.md`](../.github/copilot-instructions.md) (at least skim it)
-2. **Understand**: Every change needs approval before implementation
+1. **Read**: [`.github/copilot-instructions.md`](../../.github/copilot-instructions.md) (at least skim it)
+2. **Understand**: Some changes require a CR + ATP gate; all changes require PRs
 3. **Remember**: Tests before code (TDD), always
 
 ### The Basic Workflow
 
 ```
 1. User makes request
-2. You create CR (Change Request) document
-3. You do Impact Assessment
-4. You create Implementation Plan
-5. Wait for user to say "Approved to Proceed" (ATP)
-6. NOW you can write code (TDD: Red→Green→Refactor)
-7. Submit PR with DoD checklist completed
+2. Decide if CR is required (see docs/processes/change-management.md)
+3a. If CR-required: create CR + IA + Implementation Plan and wait for ATP
+3b. If not CR-required: follow Standard Change Path (REQ traceability + TDD)
+4. Implement on a feature branch
+5. Submit PR and meet DoD
 ```
 
-**DO NOT SKIP STEP 5!** No coding until ATP received.
+**DO NOT START IMPLEMENTATION FOR CR-REQUIRED CHANGES WITHOUT ATP.**
 
 ---
 
@@ -34,17 +33,13 @@ This is your TL;DR guide to working in this repository. For complete details, se
 
 ### Creating a Change Request (CR)
 
+CRs are required only for governed changes (requirements/approach/architecture/security/perf/breaking). See: `docs/processes/change-management.md`.
+
 ```bash
 # 1. Copy template
 cp docs/processes/templates/cr-template.md docs/processes/change-requests/CR-2026-02-09-001.md
 
-# 2. Fill it out with:
-# - What you're changing
-# - Why you're changing it
-# - Impact assessment (files, security, performance)
-# - Implementation plan (step-by-step)
-
-# 3. Present to user and wait for ATP
+# 2. Fill it out and wait for ATP
 ```
 
 ### Updating the RTM
@@ -97,13 +92,14 @@ pytest tests/test_feature.py  # Should still pass
 
 ### ❌ "I'll just quickly..."
 
-**NO.** Every change needs:
+**Nope.** Even small changes still need:
+- Feature branch + PR
+- Tests (where applicable)
+- RTM/doc updates when behavior/requirements change
+
+Some changes also need:
 - Change Request (CR)
 - Approval (ATP)
-- Tests
-- Documentation update
-
-There are no "quick" changes that bypass governance.
 
 ### ❌ "The test is wrong"
 
@@ -139,11 +135,11 @@ If you can't test it, you can't merge it.
 
 Before you create a PR, verify:
 
-- [ ] CR created and ATP received
+- [ ] If CR-required: CR created and ATP received
 - [ ] Tests written FIRST (TDD Red)
 - [ ] Code works (TDD Green)
 - [ ] Code refactored (TDD Refactor)
-- [ ] RTM updated
+- [ ] RTM updated (as needed)
 - [ ] Coverage ≥ 80%
 - [ ] Linter passes (zero warnings)
 - [ ] Security scan clean
@@ -307,7 +303,7 @@ In addition to DoD, I have my own checklist of things I commonly forget. I run t
 
 ## 📚 Next Steps
 
-1. **Read the full governance framework**: [`.github/copilot-instructions.md`](../.github/copilot-instructions.md)
+1. **Read the full governance framework**: [`.github/copilot-instructions.md`](../../.github/copilot-instructions.md)
 2. **Review a few existing CRs**: See how others document changes
 3. **Practice with a small change**: Start with a minor bug fix or doc update
 4. **Ask questions**: No question is too basic
@@ -316,7 +312,7 @@ In addition to DoD, I have my own checklist of things I commonly forget. I run t
 
 ## 🔗 Essential Links
 
-- **Main Governance**: [`.github/copilot-instructions.md`](../.github/copilot-instructions.md)
+- **Main Governance**: [`.github/copilot-instructions.md`](../../.github/copilot-instructions.md)
 - **Change Management**: [`change-management.md`](./change-management.md)
 - **Definition of Done**: [`definition-of-done.md`](./definition-of-done.md)
 - **RTM**: [`../requirements/rtm.md`](../requirements/rtm.md)

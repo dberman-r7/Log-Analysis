@@ -127,6 +127,13 @@ Observability requirements mandated for all features from day one.
 
 ## 🔄 The Complete Workflow
 
+### Two Paths: Standard vs Governed
+
+- **Standard changes (no CR)**: bug fixes, clarifications, and low-risk refactors/features that don't change existing REQ-IDs or materially impact existing workflows. These still require **feature branch + PR**, tests, and RTM/doc updates as needed.
+- **Governed changes (CR required)**: changes that modify/deprecate requirements, significantly change approach/architecture, have security/performance/SLO implications, or introduce breaking behavior.
+
+> Source of truth: `docs/processes/change-management.md`.
+
 ```mermaid
 graph TD
     A[User Request] --> B[Generate CR-ID]
@@ -179,8 +186,9 @@ The GitHub Action workflow enforces:
 ### For Developers
 1. Read `.github/copilot-instructions.md` (mandatory)
 2. Review `docs/processes/QUICKSTART.md` for quick reference
-3. Follow the change management loop for every request
-4. Use templates in `docs/processes/templates/`
+3. Use a **feature branch + PR for every change**
+4. Use the **standard change path** for routine fixes/clarifications
+5. Use the **CR loop** only for governed/high-impact changes
 
 ### For AI Assistants
 1. **Always** read `.github/copilot-instructions.md` at session start
