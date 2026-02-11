@@ -2,7 +2,9 @@
 Separated from CLI so selection logic is testable without interactive prompts.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -13,7 +15,7 @@ class LogSetDescriptor:
     name: str
     description: str = ""
     # Optional embedded membership list (from `logs_info` in the logsets response).
-    logs: list["LogDescriptor"] | None = None
+    logs: Optional[list["LogDescriptor"]] = None
 
 
 @dataclass(frozen=True)
