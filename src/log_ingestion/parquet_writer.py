@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import os
+
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -51,8 +53,39 @@ class ParquetWriter:
         self.config = config
         self.output_dir = Path(config.output_dir)
 
+        guidance = (
+            "Set OUTPUT_DIR to a writable directory (e.g., ./data/logs or /tmp/logs)."
+        )
+
         # Create output directory if it doesn't exist
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(
+                "output_dir_create_failed",
+                output_dir=str(self.output_dir),
+                error=str(e),
+                exc_info=True,
+                guidance=guidance,
+            )
+            raise OSError(
+                f"Unable to create output directory '{self.output_dir}'. "
+                f"{guidance} (via OUTPUT_DIR env var)"
+            ) from e
+
+        # Fail loudly if the directory exists but isn't writable.
+        if not os.access(self.output_dir, os.W_OK):
+            err = (
+                f"Output directory '{self.output_dir}' is not writable. "
+                f"{guidance} (via OUTPUT_DIR env var)"
+            )
+            logger.error(
+                "output_dir_not_writable",
+                output_dir=str(self.output_dir),
+                error=err,
+                guidance=guidance,
+            )
+            raise OSError(err)
 
         logger.info(
             "parquet_writer_initialized",

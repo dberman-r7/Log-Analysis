@@ -53,8 +53,8 @@ class LogIngestionConfig(BaseSettings):
     )
 
     output_dir: Path = Field(
-        ...,
-        description="Directory where Parquet files will be written",
+        default=Path("data") / "logs",
+        description="Directory where Parquet files will be written (default: ./data/logs)",
         alias="OUTPUT_DIR",
     )
 

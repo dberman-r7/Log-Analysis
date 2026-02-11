@@ -15,7 +15,7 @@ from src.log_ingestion.config import LogIngestionConfig
 
 
 def test_list_logs_in_log_set_fails_loudly_without_network_calls(mocker, tmp_path):
-    cfg = LogIngestionConfig(RAPID7_API_KEY="k", RAPID7_LOG_KEY="lk", OUTPUT_DIR=tmp_path)
+    cfg = LogIngestionConfig(rapid7_api_key="k", rapid7_log_key="lk", output_dir=tmp_path)
     client = Rapid7ApiClient(cfg)
 
     # Ensure we don't make HTTP calls from this method.

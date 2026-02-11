@@ -55,6 +55,9 @@ This document is the **single source of truth** for all system requirements. Eve
 | REQ-017 | [FUNC] | Utility shall allow user to select a log set (by index or id) and then list logs within the selected log set using embedded `logs_info` from the logsets list response | TESTED | P2 | `/src/log_ingestion/main.py:_run_log_selection()`, `/src/log_ingestion/log_selection.py`, `/src/log_ingestion/api_client.py:Rapid7ApiClient.list_log_sets()` | `/tests/test_log_selection.py`, `/tests/test_main_select_log.py`, `/tests/test_api_client_list_log_sets_embedded_logs_info.py` | ADR-0001 | 2026-02-10 |
 | REQ-018 | [FUNC] | Utility shall persist selected log id to `.env` as `RAPID7_LOG_KEY` without logging secrets | TESTED | P2 | `/src/log_ingestion/main.py`, `/src/log_ingestion/env_utils.py` | `/tests/test_env_utils.py`, `/tests/test_main_select_log.py` | ADR-0001 | 2026-02-10 |
 | REQ-019 | [NFR-REL] | Utility shall not call per-logset membership endpoints in environments where log membership is provided inline via `logs_info`, and shall fail loudly with actionable guidance when embedded membership is missing | TESTED | P1 | `/src/log_ingestion/main.py:_run_log_selection()`, `/src/log_ingestion/api_client.py:Rapid7ApiClient.list_logs_in_log_set()` | `/tests/test_main_select_log.py`, `/tests/test_api_client_list_logs_in_log_set_fallback_404.py` | ADR-0001 | 2026-02-10 |
+| REQ-020 | [FUNC] | CLI shall support module execution via `python -m src.log_ingestion.main ...` without import errors; direct script execution shall fail loudly with actionable guidance | APPROVED | P1 | `/src/log_ingestion/main.py` | `/tests/test_main_module_execution_guard.py` | ADR-0001 | 2026-02-11 |
+| REQ-021 | [FUNC] | Service shall default `OUTPUT_DIR` to a writable path when not provided, and allow override via `OUTPUT_DIR` | APPROVED | P1 | `/src/log_ingestion/config.py`, `/src/log_ingestion/parquet_writer.py` | `/tests/test_config.py`, `/tests/test_parquet_writer.py` | ADR-0001 | 2026-02-11 |
+| REQ-022 | [NFR-REL] | Service shall fail loudly with an actionable error when output directory is not writable/creatable | APPROVED | P1 | `/src/log_ingestion/parquet_writer.py` | `/tests/test_parquet_writer.py` | ADR-0001 | 2026-02-11 |
 
 ---
 
@@ -822,6 +825,102 @@ Utility shall not call per-logset membership endpoints in environments where log
 
 ---
 
+### REQ-020: Module Execution Guard
+**Category**: [FUNC]  
+**Priority**: P1  
+**Status**: APPROVED  
+**Date Added**: 2026-02-11
+
+**Description**:  
+CLI shall support module execution via `python -m src.log_ingestion.main ...` without import errors; direct script execution shall fail loudly with actionable guidance.
+
+**Acceptance Criteria**:
+- [ ] Module can be executed as `python -m src.log_ingestion.main`
+- [ ] Direct execution of the script file fails with an error message
+- [ ] No import errors when executing as a module
+- [ ] Documentation updated with module execution instructions
+
+**Related Requirements**:
+- REQ-004 (Authentication dependency)
+
+**Implemented In**:
+- File: `/src/log_ingestion/main.py`
+
+**Test Coverage**:
+- Test File: `/tests/test_main_module_execution_guard.py`
+- Test Cases:
+  - `test_module_execution_via_python_m()`
+  - `test_direct_script_execution_fails()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-021: Default Writable Output Directory
+**Category**: [FUNC]  
+**Priority**: P1  
+**Status**: APPROVED  
+**Date Added**: 2026-02-11
+
+**Description**:  
+Service shall default `OUTPUT_DIR` to a writable path when not provided, and allow override via `OUTPUT_DIR`.
+
+**Acceptance Criteria**:
+- [ ] Default `OUTPUT_DIR` is set to a writable path
+- [ ] Service starts successfully with default configuration
+- [ ] `OUTPUT_DIR` can be overridden by setting the environment variable
+- [ ] Documentation updated with configuration details
+
+**Related Requirements**:
+- REQ-008 (Configuration management)
+
+**Implemented In**:
+- File: `/src/log_ingestion/config.py`, `/src/log_ingestion/parquet_writer.py`
+
+**Test Coverage**:
+- Test File: `/tests/test_config.py`, `/tests/test_parquet_writer.py`
+- Test Cases:
+  - `test_default_output_dir_is_writable()`
+  - `test_output_dir_can_be_overridden()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-022: Output Directory Writeability Check
+**Category**: [NFR-REL]  
+**Priority**: P1  
+**Status**: APPROVED  
+**Date Added**: 2026-02-11
+
+**Description**:  
+Service shall fail loudly with an actionable error when output directory is not writable/creatable.
+
+**Acceptance Criteria**:
+- [ ] On startup, service checks if `OUTPUT_DIR` is writable
+- [ ] If not writable, service fails with an error message
+- [ ] Error message includes guidance on correcting the issue
+- [ ] No partial or corrupted data writes occur
+
+**Related Requirements**:
+- REQ-021 (Default writable output directory)
+
+**Implemented In**:
+- File: `/src/log_ingestion/parquet_writer.py`
+
+**Test Coverage**:
+- Test File: `/tests/test_parquet_writer.py`
+- Test Cases:
+  - `test_output_directory_writeability_check()`
+  - `test_service_fails_with_actionable_error()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
 ## Traceability Views
 
 ### By Status
@@ -830,7 +929,7 @@ Utility shall not call per-logset membership endpoints in environments where log
 - REQ-001, REQ-002, REQ-003
 
 #### APPROVED
-- REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011
+- REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011, REQ-020, REQ-021, REQ-022
 
 #### IN_PROGRESS
 - (None yet)
@@ -855,7 +954,7 @@ Utility shall not call per-logset membership endpoints in environments where log
 - REQ-009
 
 #### P1 - HIGH
-- REQ-003, REQ-004, REQ-005, REQ-006, REQ-007
+- REQ-003, REQ-004, REQ-005, REQ-006, REQ-007, REQ-020, REQ-021, REQ-022
 
 #### P2 - MEDIUM
 - REQ-001, REQ-002, REQ-008, REQ-010, REQ-011, REQ-016, REQ-017, REQ-018
@@ -874,6 +973,7 @@ Utility shall not call per-logset membership endpoints in environments where log
 | 2026-02-10 | REQ-012, REQ-013, REQ-014, REQ-015 | Log Search API requirements | Development Team | CR-2026-02-10-002 |
 | 2026-02-10 | REQ-016, REQ-017, REQ-018, REQ-019 | Log set selection and persistence requirements | Development Team | CR-2026-02-10-003 |
 | 2026-02-10 | REQ-016, REQ-017, REQ-018, REQ-019 | Mark log set selection requirements as TESTED and update trace links for embedded `logs_info` selection flow | Development Team | CR-2026-02-10-006 |
+| 2026-02-11 | REQ-020, REQ-021, REQ-022 | Module execution and output directory requirements | Development Team | CR-2026-02-11-001 |
 
 ---
 
@@ -944,27 +1044,27 @@ Before considering a requirement "complete", verify:
 
 ### Coverage Statistics
 
-- **Total Requirements**: 19
+- **Total Requirements**: 22
 - **Implemented**: 0 (0%)
-- **Tested**: 8 (42%)
+- **Tested**: 8 (36%)
 - **Deployed**: 0 (0%)
-- **Approved**: 8 (42%)
+- **Approved**: 14 (64%)
 
 ### By Category
 
-- **Functional**: 10 (53%)
-- **Performance**: 2 (11%)
-- **Security**: 3 (16%)
+- **Functional**: 13 (59%)
+- **Performance**: 2 (9%)
+- **Security**: 3 (14%)
 - **Observability**: 1 (5%)
-- **Reliability**: 2 (11%)
+- **Reliability**: 3 (14%)
 - **Scalability**: 0 (0%)
 - **Maintainability**: 0 (0%)
 
 ### By Priority
 
 - **P0 (Critical)**: 1 (5%)
-- **P1 (High)**: 6 (32%)
-- **P2 (Medium)**: 12 (63%)
+- **P1 (High)**: 8 (36%)
+- **P2 (Medium)**: 13 (59%)
 - **P3 - LOW**: 0 (0%)
 
 ---

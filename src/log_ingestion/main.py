@@ -48,6 +48,23 @@ structlog.configure(
 logger = structlog.get_logger()
 
 
+def _ensure_module_execution_context() -> None:
+    """Guard against running this file directly (breaks relative imports).
+
+    REQ-020: Users should run this as a module:
+      python -m src.log_ingestion.main ...
+
+    Direct execution (`python src/log_ingestion/main.py`) causes relative-import
+    errors because the package context isn't established.
+    """
+
+    if __name__ == "__main__" and not __package__:
+        raise RuntimeError(
+            "This module must be executed with an importable package context. "
+            "Run: python -m src.log_ingestion.main --start-time ... --end-time ..."
+        )
+
+
 def parse_args(argv=None):
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -71,7 +88,7 @@ Environment Variables:
   RAPID7_DATA_STORAGE_REGION   - Optional: Log Search region (default: eu)
   RAPID7_LOG_KEY               - Optional: Log key for Log Search (default: test-log-key)
   RAPID7_QUERY                 - Optional: Log Search query string (default: empty)
-  OUTPUT_DIR                   - Required: Output directory for Parquet files
+  OUTPUT_DIR                   - Optional: Output directory for Parquet files (default: ./data/logs)
 
   LOG_LEVEL                    - Optional: Logging level (default: INFO)
   BATCH_SIZE                   - Optional: Records per batch (default: 1000)
@@ -215,6 +232,7 @@ def _run_log_selection(config: LogIngestionConfig, env_file: str) -> int:
 
 def main():
     """Main entry point for the log ingestion service."""
+    _ensure_module_execution_context()
     # Parse command-line arguments
     args = parse_args()
 
