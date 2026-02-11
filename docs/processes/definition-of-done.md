@@ -27,10 +27,10 @@ Use this checklist for **every** pull request:
 ### 1. Requirements & Planning
 
 - [ ] **Requirements Documented**: All requirements are documented in RTM with REQ-IDs
-- [ ] **CR Created**: Change Request (CR-YYYY-MM-DD-XXX) is created and approved
-- [ ] **Impact Assessment**: Blast radius analysis completed
-- [ ] **Implementation Plan**: Step-by-step plan documented and followed
-- [ ] **ATP Received**: "Approved to Proceed" token received from user
+- [ ] **CR Created (if required)**: CR is created and approved **only when the change meets CR-required triggers** (see `docs/processes/change-management.md`)
+- [ ] **Impact Assessment (if CR-required)**: Blast radius analysis completed for governed changes
+- [ ] **Implementation Plan (if CR-required)**: Step-by-step plan documented and followed for governed changes
+- [ ] **ATP Received (if CR-required)**: "Approved to Proceed" token received from user before implementation for governed changes
 
 ---
 
@@ -205,12 +205,13 @@ Use this checklist for **every** pull request:
 
 ### 8. Git & PR
 
+- [ ] **Feature Branch Used**: All changes are made on a feature branch (no direct commits to `main`)
 - [ ] **Branch Named Correctly**: `feat/REQ-XXX-description` or `fix/Issue-NNN-description`
 - [ ] **Commit Messages**: Clear, descriptive commit messages
   - [ ] Follow conventional commits format
   - [ ] Include context and reasoning
   
-- [ ] **PR Title**: Format: `[CR-YYYY-MM-DD-XXX] Brief description`
+- [ ] **PR Title**: Format: `[CR-YYYY-MM-DD-XXX] Brief description` (if CR-required) **or** `[REQ-XXX] Brief description` / `[BUG] Brief description` (if no CR)
 - [ ] **PR Description**: Complete PR template filled out
   - [ ] CR-ID included
   - [ ] Requirements listed

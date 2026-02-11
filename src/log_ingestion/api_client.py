@@ -108,8 +108,9 @@ class Rapid7ApiClient:
     def _is_query_in_progress(cls, body: dict[str, Any]) -> bool:
         links = cls._links_map(body)
         if not links:
+            # Terminal response (single page) commonly has no links.
             return False
-        # Provider spec: Self => still running; Next => terminal page ready
+        # Provider spec: Self => still running; Next => page ready.
         if "Self" in links:
             return True
         if "Next" in links:
@@ -123,17 +124,33 @@ class Rapid7ApiClient:
     def _raise_rate_limited(resp: requests.Response) -> None:
         if resp.status_code != 429:
             return
-        secs_until_reset = resp.headers.get("X-RateLimit-Reset")
-        if secs_until_reset is None:
-            secs_until_reset_int = 1
-        else:
+
+        # Prefer Retry-After when available.
+        retry_after = resp.headers.get("Retry-After")
+        reset = resp.headers.get("X-RateLimit-Reset")
+
+        def _parse_secs(value: Optional[str]) -> Optional[int]:
+            if value is None:
+                return None
             try:
-                secs_until_reset_int = int(secs_until_reset)
-            except ValueError:
-                secs_until_reset_int = 1
+                secs = int(value)
+            except (TypeError, ValueError):
+                return None
+            return secs
+
+        secs = _parse_secs(retry_after)
+        if secs is None:
+            secs = _parse_secs(reset)
+
+        # Bound/validate to avoid hanging on bad headers.
+        if secs is None or secs < 1:
+            secs = 1
+        if secs > 60:
+            secs = 60
+
         raise RateLimitedException(
-            f"Log Search API key rate limited. Seconds until reset: {secs_until_reset}",
-            secs_until_reset_int,
+            "Log Search API key rate limited.",
+            secs,
         )
 
     def _poll_request_to_completion(self, initial_resp: requests.Response) -> requests.Response:
@@ -328,10 +345,10 @@ class Rapid7ApiClient:
     def fetch_logs(self, start_time: str, end_time: str) -> str:
         """Fetch Log Search results for a time range.
 
-        Notes:
-            Provider expects from/to in epoch millis. For now we pass through and assume
-            caller already provides millis or API accepts ISO strings. If not, we’ll add
-            explicit conversion once the expected format is confirmed.
+        Provider expects from/to in epoch millis.
+
+        Returns:
+            A JSON string containing an aggregated representation of all pages.
         """
 
         base = f"https://{self.config.rapid7_data_storage_region}.rest.logs.insight.rapid7.com"
@@ -353,6 +370,22 @@ class Rapid7ApiClient:
             resp = self._request_get(url, params=params)
             if resp.status_code == 429:
                 self._raise_rate_limited(resp)
+
+            if resp.status_code == 404:
+                guidance = (
+                    "Log Search query endpoint returned 404. This typically indicates a mismatch between "
+                    "(a) RAPID7_DATA_STORAGE_REGION, (b) the base URL for your account/region, or (c) an invalid "
+                    "RAPID7_LOG_KEY. Confirm the log key by running: python -m src.log_ingestion.main --select-log ... "
+                    "and ensure the region matches your Rapid7 environment."
+                )
+                logger.error(
+                    "logsearch_query_endpoint_not_found",
+                    url=url,
+                    region=self.config.rapid7_data_storage_region,
+                    log_key=self.config.rapid7_log_key,
+                    guidance=guidance,
+                )
+
             resp.raise_for_status()
             return resp
 
@@ -368,19 +401,19 @@ class Rapid7ApiClient:
                 if attempts > self.config.retry_attempts:
                     raise
 
+        # Poll the initial query request to completion.
         page_resp = self._poll_request_to_completion(resp)
-        pages: list[dict[str, Any]] = []
 
+        pages: list[dict[str, Any]] = []
         body = page_resp.json()
         pages.append(body)
 
+        # Pagination: always follow `Next` from the most recent *completed* page.
         while self._has_next_page(body):
-            next_resp = self._poll_request_to_completion(self._get_next_page(page_resp))
-            page_resp = next_resp
+            next_seed = self._get_next_page(page_resp)
+            page_resp = self._poll_request_to_completion(next_seed)
             body = page_resp.json()
             pages.append(body)
 
-        aggregated: dict[str, Any] = {
-            "pages": pages,
-        }
+        aggregated: dict[str, Any] = {"pages": pages}
         return json.dumps(aggregated)

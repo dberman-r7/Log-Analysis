@@ -58,6 +58,8 @@ This document is the **single source of truth** for all system requirements. Eve
 | REQ-020 | [FUNC] | CLI shall support module execution via `python -m src.log_ingestion.main ...` without import errors; direct script execution shall fail loudly with actionable guidance | APPROVED | P1 | `/src/log_ingestion/main.py` | `/tests/test_main_module_execution_guard.py` | ADR-0001 | 2026-02-11 |
 | REQ-021 | [FUNC] | Service shall default `OUTPUT_DIR` to a writable path when not provided, and allow override via `OUTPUT_DIR` | APPROVED | P1 | `/src/log_ingestion/config.py`, `/src/log_ingestion/parquet_writer.py` | `/tests/test_config.py`, `/tests/test_parquet_writer.py` | ADR-0001 | 2026-02-11 |
 | REQ-022 | [NFR-REL] | Service shall fail loudly with an actionable error when output directory is not writable/creatable | APPROVED | P1 | `/src/log_ingestion/parquet_writer.py` | `/tests/test_parquet_writer.py` | ADR-0001 | 2026-02-11 |
+| REQ-023 | [FUNC] | Service shall convert CLI-provided ISO8601 timestamps to epoch-millis before calling the Rapid7 Log Search query endpoint | APPROVED | P1 | `/src/log_ingestion/service.py:LogIngestionService.run()` | `/tests/test_service.py:test_service_converts_iso8601_to_epoch_millis_for_api_client` | ADR-0001 | 2026-02-11 |
+| REQ-024 | [NFR-REL] | API client shall handle HTTP 429 by honoring `Retry-After` when present and otherwise falling back to `X-RateLimit-Reset`, with bounded, validated sleep | APPROVED | P1 | `/src/log_ingestion/api_client.py:Rapid7ApiClient._raise_rate_limited()` | `/tests/test_api_client.py:test_api_client_handles_429_rate_limit` | ADR-0001 | 2026-02-11 |
 
 ---
 
@@ -921,6 +923,73 @@ Service shall fail loudly with an actionable error when output directory is not 
 
 ---
 
+### REQ-023: Convert CLI ISO8601 Timestamps to Epoch-Millis
+**Category**: [FUNC]  
+**Priority**: P1  
+**Status**: APPROVED  
+**Date Added**: 2026-02-11
+
+**Description**:  
+Service shall convert CLI-provided ISO8601 timestamps to epoch-millis before calling the Rapid7 Log Search query endpoint.
+
+**Acceptance Criteria**:
+- [ ] Service converts `--start` and `--end` CLI arguments from ISO8601 to epoch-millis
+- [ ] Converted timestamps are valid epoch-millis integers
+- [ ] Service logs original and converted timestamp values
+- [ ] Documentation updated with timestamp format details
+
+**Related Requirements**:
+- REQ-005 (Functional requirement for API fetching)
+
+**Implemented In**:
+- File: `/src/log_ingestion/service.py`
+- Method: `LogIngestionService.run()`
+
+**Test Coverage**:
+- Test File: `/tests/test_service.py`
+- Test Cases:
+  - `test_service_converts_iso8601_to_epoch_millis_for_api_client()`
+  - `test_service_runs_successfully_with_converted_timestamps()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-024: Enhanced 429 Handling with Retry-After
+**Category**: [NFR-REL]  
+**Priority**: P1  
+**Status**: APPROVED  
+**Date Added**: 2026-02-11
+
+**Description**:  
+API client shall handle HTTP 429 by honoring `Retry-After` when present and otherwise falling back to `X-RateLimit-Reset`, with bounded, validated sleep.
+
+**Acceptance Criteria**:
+- [ ] On 429 response, client checks for `Retry-After` header
+- [ ] If `Retry-After` is present, client sleeps for that duration (in seconds)
+- [ ] If `Retry-After` is not present, client falls back to `X-RateLimit-Reset`
+- [ ] Client logs rate limiting details and sleep duration
+- [ ] No unbounded or excessive sleeping on rate limit
+
+**Related Requirements**:
+- REQ-015 (Rate limit handling)
+
+**Implemented In**:
+- File: `/src/log_ingestion/api_client.py`
+- Method: `Rapid7ApiClient._raise_rate_limited()`
+
+**Test Coverage**:
+- Test File: `/tests/test_api_client.py`
+- Test Cases:
+  - `test_api_client_handles_429_rate_limit()`
+  - `test_api_client_retries_after_sleep()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
 ## Traceability Views
 
 ### By Status
@@ -929,7 +998,7 @@ Service shall fail loudly with an actionable error when output directory is not 
 - REQ-001, REQ-002, REQ-003
 
 #### APPROVED
-- REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011, REQ-020, REQ-021, REQ-022
+- REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011, REQ-020, REQ-021, REQ-022, REQ-023, REQ-024
 
 #### IN_PROGRESS
 - (None yet)
@@ -954,7 +1023,7 @@ Service shall fail loudly with an actionable error when output directory is not 
 - REQ-009
 
 #### P1 - HIGH
-- REQ-003, REQ-004, REQ-005, REQ-006, REQ-007, REQ-020, REQ-021, REQ-022
+- REQ-003, REQ-004, REQ-005, REQ-006, REQ-007, REQ-020, REQ-021, REQ-022, REQ-023, REQ-024
 
 #### P2 - MEDIUM
 - REQ-001, REQ-002, REQ-008, REQ-010, REQ-011, REQ-016, REQ-017, REQ-018
@@ -974,6 +1043,7 @@ Service shall fail loudly with an actionable error when output directory is not 
 | 2026-02-10 | REQ-016, REQ-017, REQ-018, REQ-019 | Log set selection and persistence requirements | Development Team | CR-2026-02-10-003 |
 | 2026-02-10 | REQ-016, REQ-017, REQ-018, REQ-019 | Mark log set selection requirements as TESTED and update trace links for embedded `logs_info` selection flow | Development Team | CR-2026-02-10-006 |
 | 2026-02-11 | REQ-020, REQ-021, REQ-022 | Module execution and output directory requirements | Development Team | CR-2026-02-11-001 |
+| 2026-02-11 | REQ-023, REQ-024 | Timestamp conversion and enhanced 429 handling requirements | Development Team | CR-2026-02-11-002 |
 
 ---
 
@@ -1044,27 +1114,27 @@ Before considering a requirement "complete", verify:
 
 ### Coverage Statistics
 
-- **Total Requirements**: 22
+- **Total Requirements**: 24
 - **Implemented**: 0 (0%)
-- **Tested**: 8 (36%)
+- **Tested**: 8 (33%)
 - **Deployed**: 0 (0%)
-- **Approved**: 14 (64%)
+- **Approved**: 16 (67%)
 
 ### By Category
 
-- **Functional**: 13 (59%)
-- **Performance**: 2 (9%)
-- **Security**: 3 (14%)
-- **Observability**: 1 (5%)
-- **Reliability**: 3 (14%)
+- **Functional**: 13 (54%)
+- **Performance**: 2 (8%)
+- **Security**: 3 (13%)
+- **Observability**: 1 (4%)
+- **Reliability**: 3 (13%)
 - **Scalability**: 0 (0%)
 - **Maintainability**: 0 (0%)
 
 ### By Priority
 
-- **P0 (Critical)**: 1 (5%)
-- **P1 (High)**: 8 (36%)
-- **P2 (Medium)**: 13 (59%)
+- **P0 (Critical)**: 1 (4%)
+- **P1 (High)**: 9 (38%)
+- **P2 (Medium)**: 14 (58%)
 - **P3 - LOW**: 0 (0%)
 
 ---

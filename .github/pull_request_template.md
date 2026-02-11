@@ -1,34 +1,41 @@
 ## Change Request
-**CR ID**: CR-YYYY-MM-DD-XXX  
-**Category**: [FEATURE|BUG|REFACTOR|SECURITY|PERFORMANCE|DOCS]  
-**Priority**: [P0|P1|P2|P3]
+**CR Required?**: [ ] Yes [ ] No
+
+**If Yes (CR-required changes)**:
+- **CR ID**: CR-YYYY-MM-DD-XXX
+- **Category**: [FEATURE|BUG|REFACTOR|SECURITY|PERFORMANCE|DOCS]
+- **Priority**: [P0|P1|P2|P3]
+
+**If No (Standard Change Path)**:
+- **Work Item**: [REQ-XXX] / [BUG] / [DOCS] (pick one)
+- **Rationale for no CR**: [Why this doesn’t meet CR-required triggers]
 
 ## Requirements
-**Implements**: REQ-XXX, REQ-YYY  
+**Implements**: REQ-XXX, REQ-YYY
 **RTM Updated**: [ ] Yes [ ] No - Link: /docs/requirements/rtm.md
 
 ## Impact Assessment
-**Files Changed**: X files  
-**Lines Added**: +XXX  
+**Files Changed**: X files
+**Lines Added**: +XXX
 **Lines Removed**: -XXX
 
-**Breaking Changes**: [ ] Yes [ ] No  
-**Security Impact**: [Brief description]  
+**Breaking Changes**: [ ] Yes [ ] No
+**Security Impact**: [Brief description]
 **Performance Impact**: [Brief description]
 
 ## Architectural Decisions
-**ADR Created/Updated**: [ ] Yes [ ] No - Link: /docs/arch/adr/NNNN-title.md  
+**ADR Created/Updated**: [ ] Yes [ ] No - Link: /docs/arch/adr/NNNN-title.md
 **Diagrams Updated**: [ ] Yes [ ] No - Link: /docs/arch/diagrams/
 
 ## Testing
-**Test Coverage**: XX%  
-**Tests Added**: X unit, Y integration, Z e2e  
+**Test Coverage**: XX%
+**Tests Added**: X unit, Y integration, Z e2e
 **All Tests Passing**: [ ] Yes [ ] No
 
 ## Documentation
-**README Updated**: [ ] Yes [ ] N/A  
-**API Docs Updated**: [ ] Yes [ ] N/A  
-**Runbooks Updated**: [ ] Yes [ ] N/A
+**README Updated**: [ ] Yes [ ] No [ ] N/A
+**API Docs Updated**: [ ] Yes [ ] No [ ] N/A
+**Runbooks Updated**: [ ] Yes [ ] No [ ] N/A
 
 ## Definition of Done
 - [ ] Requirements documented in RTM
