@@ -11,29 +11,101 @@
 
 ### Purpose
 
-The Log Ingestion Service pulls logs from the Rapid7 InsightOps API and stores them in Apache Parquet format for analytics. It provides:
+The Log Ingestion Service pulls logs from the Rapid7 InsightOps **Log Search** API and stores them in Apache Parquet format for analytics. It provides:
 - Automated log extraction from Rapid7
-- Dynamic CSV schema detection
 - Efficient Parquet file storage with compression
 - Structured logging and metrics
 
 ### Architecture
 
 ```
-[Rapid7 API] → [API Client] → [CSV Parser] → [Parquet Writer] → [File System]
-                    ↓               ↓              ↓
-                 [Structured Logs & Metrics]
+[Rapid7 Log Search API] → [API Client] → [(JSON→tabular) Transformation] → [Parquet Writer] → [File System]
+           ↑
+   (submit query → poll Self link → follow Next page)
 ```
 
 ### Key Components
 
 | Component | Purpose | Technology |
-|-----------|---------|------------|
-| API Client | Fetch logs from Rapid7 | requests library |
-| Parser | Parse CSV with dynamic schema | pandas |
+|----------|---------|------------|
+| API Client | Fetch logs from Rapid7 Log Search (query/poll/pages) | requests library |
+| Parser/Transform | Convert Log Search JSON events to a tabular structure | pandas |
 | Parquet Writer | Write compressed Parquet files | pyarrow |
 | Configuration | Manage settings | pydantic |
 | Logging | Structured observability | structlog |
+
+---
+
+## Running from IntelliJ IDEA (Run Configurations)
+
+These steps work in IntelliJ IDEA (with the Python plugin) and PyCharm. They’re the most reliable way to run the service and utilities without fighting shell/env differences.
+
+### Prerequisites
+
+- A configured Python interpreter for the project (recommended: a virtualenv).
+- A `.env` file in the repository root (or another path you control).
+
+> Tip: In the IDE, open *Settings → Project → Python Interpreter* and confirm the interpreter has the project dependencies installed.
+
+### Recommended: create a shared “Common” template
+
+If you’ll run this often, keep the following consistent across configs:
+- **Working directory**: repo root (`.../Log-Analysis-Working`)
+- **Interpreter**: the project venv/interpreter
+- **Environment**: either load from `.env` (preferred) or set env vars explicitly
+
+### Run the main ingestion pipeline
+
+Create a **Python** Run Configuration:
+
+1. **Run → Edit Configurations… → + → Python**
+2. Set:
+   - **Name**: `Log Ingestion (main)`
+   - **Module name**: `src.log_ingestion.main`
+     - (Equivalent to: `python3 -m src.log_ingestion.main`)
+   - **Working directory**: the repo root (`.../Log-Analysis-Working`)
+   - **Parameters** (example):
+     - `--start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z"`
+     - Optional: `--partition-date "2026-02-10"`
+3. **Environment variables** (choose one):
+
+   **Option A (preferred): load from `.env`**
+   - If your IDE supports an “EnvFile”/“.env file” field, point it at the repo root `.env`.
+
+   **Option B: set environment variables directly**
+   - Paste key=val pairs into the Run Configuration’s **Environment variables**.
+
+Required variables for a real ingestion run:
+- `RAPID7_API_KEY`
+- `RAPID7_DATA_STORAGE_REGION`
+- `RAPID7_LOG_KEY`
+- `OUTPUT_DIR`
+
+Optional variables:
+- `RAPID7_QUERY`
+- `LOG_LEVEL`, `BATCH_SIZE`, `RATE_LIMIT`, `RETRY_ATTEMPTS`, `PARQUET_COMPRESSION`
+
+### Run the “Select Log” utility (writes `RAPID7_LOG_KEY` into `.env`)
+
+This is an interactive helper that:
+1) lists **log sets** from the Rapid7 management endpoint,
+2) prompts you to pick a log set,
+3) lists the **logs within that log set**,
+4) prompts you to pick a log, and
+5) updates `RAPID7_LOG_KEY` in your chosen `.env` file.
+
+Create a second **Python** Run Configuration:
+
+- **Name**: `Log Ingestion (select log)`
+- **Module name**: `src.log_ingestion.main`
+- **Working directory**: repo root
+- **Parameters** (example):
+  - `--select-log --env-file .env --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T00:00:01Z"`
+
+Notes:
+- `--start-time/--end-time` are required by the CLI argument parser, but are ignored when `--select-log` is provided.
+- The IDE Run tool window is interactive here and will prompt for input (choose a log set number/id, then a log number/id).
+- If you run in an IDE that can’t provide stdin to the process, run the same command from a terminal instead.
 
 ---
 
@@ -56,16 +128,16 @@ ls -lh /data/logs/*.parquet
 
 ```bash
 # Start service (one-time run)
-python -m src.log_ingestion.main
+python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z"
 
 # Start service (background)
-nohup python -m src.log_ingestion.main > /var/log/log-ingestion/service.log 2>&1 &
+nohup python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z" > /var/log/log-ingestion/service.log 2>&1 &
 
 # Stop service
 kill -SIGTERM <PID>
 
 # Check configuration
-python -c "from src.log_ingestion.config import LogIngestionConfig; print(LogIngestionConfig())"
+python3 -c "from src.log_ingestion.config import LogIngestionConfig; print(LogIngestionConfig())"
 ```
 
 ---
@@ -76,14 +148,16 @@ python -c "from src.log_ingestion.config import LogIngestionConfig; print(LogIng
 
 | Variable | Description | Example | Required |
 |----------|-------------|---------|----------|
-| `RAPID7_API_KEY` | API authentication key | `abc123...` | ✅ Yes |
-| `RAPID7_API_ENDPOINT` | Base API URL | `https://api.rapid7.com/v1` | ✅ Yes |
+| `RAPID7_API_KEY` | API authentication key (sent as `x-api-key`) | `abc123...` | ✅ Yes |
+| `RAPID7_DATA_STORAGE_REGION` | Rapid7 data storage region used to construct the Log Search base URL | `us` | ✅ Yes |
+| `RAPID7_LOG_KEY` | Log key used in the Log Search endpoint path | `your-log-key` | ✅ Yes |
 | `OUTPUT_DIR` | Directory for Parquet files | `/data/logs` | ✅ Yes |
 
 ### Optional Environment Variables
 
 | Variable | Description | Default | Valid Values |
 |----------|-------------|---------|--------------|
+| `RAPID7_QUERY` | Log Search query filter (provider query language) | *(empty / provider default)* | provider-specific string |
 | `LOG_LEVEL` | Logging verbosity | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `BATCH_SIZE` | Records per batch | `1000` | `100` - `10000` |
 | `RATE_LIMIT` | Max API requests/minute | `60` | `1` - `1000` |
@@ -95,10 +169,12 @@ python -c "from src.log_ingestion.config import LogIngestionConfig; print(LogIng
 ```bash
 # Required
 RAPID7_API_KEY=your_api_key_here
-RAPID7_API_ENDPOINT=https://api.rapid7.com/v1
+RAPID7_DATA_STORAGE_REGION=us
+RAPID7_LOG_KEY=your_log_key_here
 OUTPUT_DIR=/data/logs
 
 # Optional
+RAPID7_QUERY=where(message contains \"error\")
 LOG_LEVEL=INFO
 BATCH_SIZE=1000
 RATE_LIMIT=60
@@ -106,48 +182,40 @@ RETRY_ATTEMPTS=3
 PARQUET_COMPRESSION=snappy
 ```
 
-**Important**: Never commit `.env` file to git! Use `.env.example` as template.
-
----
-
-## Installation
-
-### Prerequisites
-
-- Python 3.9 or higher
-- pip (Python package manager)
-- Virtual environment tool (venv or virtualenv)
-- Write access to output directory
-- Network access to Rapid7 API
-
-### Installation Steps
-
-```bash
-# 1. Clone repository
-git clone https://github.com/your-org/Log-Analysis.git
-cd Log-Analysis
-
-# 2. Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure environment
-cp .env.example .env
-# Edit .env with your credentials
-
-# 5. Create output directory
-mkdir -p /data/logs
-
-# 6. Test configuration
-python -c "from src.log_ingestion.config import LogIngestionConfig; LogIngestionConfig()"
-```
+**Important**:
+- Never commit `.env` to git.
+- Don’t hardcode API keys in scripts or shell history. Prefer loading from `.env` or your secret manager.
 
 ---
 
 ## Operations
+
+### Rapid7 Log Search request lifecycle (operational model)
+
+The provider Log Search API is asynchronous and link-driven.
+
+**Base URL** (derived from region):
+- `https://{region}.rest.logs.insight.rapid7.com`
+
+**Query endpoint** (derived from region + log key):
+- `GET https://{region}.rest.logs.insight.rapid7.com/query/logs/{log_key}`
+
+**Management endpoints**:
+- List log sets: `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets`
+- List logs (legacy / flat): `GET https://{region}.rest.logs.insight.rapid7.com/management/logs`
+- List logs in a log set: `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets/{logSetId}/logs`
+
+**Auth**:
+- Requests include `x-api-key: $RAPID7_API_KEY`
+
+**Lifecycle**:
+1. **Submit** a query request with query params (`from`, `to`, `query`).
+2. The response includes a `links` array.
+   - `rel=Self`: continuation link used for **polling** while the query is still running.
+   - `rel=Next`: link to the **next page** of results.
+3. The client polls the `Self` link with bounded exponential backoff until the query completes.
+4. When a page is complete, the client follows `Next` (if present) to fetch subsequent pages.
+5. If the API returns **HTTP 429**, the client waits for the number of seconds in the `X-RateLimit-Reset` header, then retries.
 
 ### Starting the Service
 
@@ -160,7 +228,7 @@ For manual, one-time log extraction:
 source venv/bin/activate
 
 # Run service
-python -m src.log_ingestion.main
+python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z"
 ```
 
 #### Background Service
@@ -169,7 +237,7 @@ For continuous operation:
 
 ```bash
 # Start in background
-nohup python -m src.log_ingestion.main > /var/log/log-ingestion/service.log 2>&1 &
+nohup python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z" > /var/log/log-ingestion/service.log 2>&1 &
 
 # Save PID
 echo $! > /var/run/log-ingestion.pid
@@ -191,7 +259,7 @@ Group=logservice
 WorkingDirectory=/opt/log-analysis
 Environment="PATH=/opt/log-analysis/venv/bin"
 EnvironmentFile=/opt/log-analysis/.env
-ExecStart=/opt/log-analysis/venv/bin/python -m src.log_ingestion.main
+ExecStart=/opt/log-analysis/venv/bin/python -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z"
 Restart=on-failure
 RestartSec=10
 StandardOutput=append:/var/log/log-ingestion/service.log
@@ -226,7 +294,7 @@ For periodic execution (e.g., hourly):
 crontab -e
 
 # Add entry (runs every hour)
-0 * * * * /opt/log-analysis/venv/bin/python -m src.log_ingestion.main >> /var/log/log-ingestion/cron.log 2>&1
+0 * * * * /opt/log-analysis/venv/bin/python -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z" >> /var/log/log-ingestion/cron.log 2>&1
 ```
 
 ### Stopping the Service
@@ -241,7 +309,7 @@ kill -SIGTERM $(cat /var/run/log-ingestion.pid)
 sudo systemctl stop log-ingestion
 
 # Force kill (not recommended)
-pkill -f "python -m src.log_ingestion.main"
+pkill -f "python3 -m src.log_ingestion.main"
 ```
 
 ### Restarting the Service
@@ -253,7 +321,7 @@ sudo systemctl restart log-ingestion
 # Manual
 kill -SIGTERM $(cat /var/run/log-ingestion.pid)
 sleep 2
-python -m src.log_ingestion.main &
+python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z" &
 ```
 
 ---
@@ -297,8 +365,8 @@ Logs are written in JSON format to stdout/stderr:
 - `api_request`: API call initiated
 - `api_response`: API call completed
 - `logs_fetched`: Logs retrieved from API
-- `parse_start`: CSV parsing started
-- `parse_complete`: Parsing finished
+- `transform_start`: JSON-to-tabular transformation started
+- `transform_complete`: Transformation finished
 - `file_write_start`: Parquet write started
 - `file_write_complete`: File written successfully
 - `batch_complete`: Batch processing finished
@@ -372,7 +440,7 @@ df -h /data/logs
 **Diagnosis**:
 ```bash
 # Check configuration
-python -c "from src.log_ingestion.config import LogIngestionConfig; LogIngestionConfig()"
+python3 -c "from src.log_ingestion.config import LogIngestionConfig; LogIngestionConfig()"
 
 # Check environment variables
 env | grep RAPID7
@@ -381,10 +449,9 @@ env | grep OUTPUT_DIR
 
 **Solutions**:
 1. Verify all required environment variables are set
-2. Check API key is not empty
-3. Verify API endpoint is valid URL
-4. Ensure output directory exists and is writable
-5. Check Python version is 3.9+
+2. Ensure `RAPID7_DATA_STORAGE_REGION` and `RAPID7_LOG_KEY` are present
+3. Ensure output directory exists and is writable
+4. Check Python version is 3.9+
 
 ---
 
@@ -396,92 +463,23 @@ env | grep OUTPUT_DIR
 
 **Diagnosis**:
 ```bash
-# Test API key manually
-curl -H "Authorization: Bearer $RAPID7_API_KEY" $RAPID7_API_ENDPOINT/test
+# Example endpoint shape (region + log key)
+ENDPOINT="https://${RAPID7_DATA_STORAGE_REGION}.rest.logs.insight.rapid7.com/query/logs/${RAPID7_LOG_KEY}"
+
+# Submit a minimal query (adjust body per your org/query needs)
+curl -sS \
+  -H "x-api-key: ${RAPID7_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"from":"2026-02-10T00:00:00Z","to":"2026-02-10T00:05:00Z","query":""}' \
+  "$ENDPOINT" | head
 ```
 
 **Solutions**:
 1. Verify API key is correct and not expired
 2. Check API key has required permissions
 3. Rotate API key in Rapid7 console
-4. Update `.env` file with new key
+4. Update `.env` (or secret manager) with the new key
 5. Restart service
-
-**Prevention**:
-- Set up API key rotation schedule (quarterly)
-- Monitor for approaching expiration dates
-
----
-
-### Issue: High Parse Error Rate
-
-**Symptoms**:
-- `parse_errors_total` metric increasing
-- Logs show "Parse Error" events
-- Incomplete data in Parquet files
-
-**Diagnosis**:
-```bash
-# Check error logs
-grep "parse_error" /var/log/log-ingestion/service.log | jq .
-
-# Review sample of failed data
-grep "parse_error" /var/log/log-ingestion/service.log | jq -r .raw_data | head -5
-```
-
-**Solutions**:
-1. **Schema Changed**: Update parser to handle new fields
-2. **Malformed CSV**: Contact Rapid7 support, add validation
-3. **Encoding Issues**: Check character encoding in parser
-4. **Special Characters**: Improve CSV parsing options
-
-**Temporary Mitigation**:
-- Enable debug logging: `LOG_LEVEL=DEBUG`
-- Reduce batch size to isolate problematic records
-- Skip malformed records (log for manual review)
-
----
-
-### Issue: Disk Space Exhaustion
-
-**Symptoms**:
-- Service fails with "No space left on device"
-- Disk usage > 90%
-- File write errors
-
-**Diagnosis**:
-```bash
-# Check disk usage
-df -h /data/logs
-
-# Check file sizes
-du -sh /data/logs/*
-
-# Count files
-find /data/logs -name "*.parquet" | wc -l
-```
-
-**Solutions**:
-1. **Immediate**: Delete old files
-   ```bash
-   find /data/logs -name "*.parquet" -mtime +30 -delete
-   ```
-
-2. **Short-term**: Archive to cold storage
-   ```bash
-   tar -czf logs-archive-$(date +%Y%m).tar.gz /data/logs/2026/01/
-   aws s3 cp logs-archive-*.tar.gz s3://bucket/archives/
-   ```
-
-3. **Long-term**: 
-   - Implement automated retention policy
-   - Increase disk size
-   - Add file rotation to service
-
-**Prevention**:
-- Set up disk space monitoring
-- Implement automated archival (cron job)
-- Configure retention policy in service
 
 ---
 
@@ -492,95 +490,88 @@ find /data/logs -name "*.parquet" | wc -l
 - Logs show rate limit backoff
 - Slow data ingestion
 
-**Diagnosis**:
-```bash
-# Check rate limit metrics
-grep "rate_limit" /var/log/log-ingestion/service.log | jq .
+**What the client does**:
+- Waits the number of seconds provided in the `X-RateLimit-Reset` header, then retries.
 
-# Count API calls per minute
-grep "api_request" /var/log/log-ingestion/service.log | \
-  jq -r .timestamp | cut -d: -f1-2 | uniq -c
-```
-
-**Solutions**:
-1. **Reduce Rate**: Lower `RATE_LIMIT` environment variable
-   ```bash
-   RATE_LIMIT=30  # Reduce from 60 to 30 requests/min
-   ```
-
-2. **Increase Batch Size**: Fetch more logs per request
-   ```bash
-   BATCH_SIZE=5000  # Increase from 1000 to 5000
-   ```
-
-3. **Contact Rapid7**: Request rate limit increase
-
-**Prevention**:
-- Monitor Retry-After headers from API
-- Implement adaptive rate limiting
+**Operator actions**:
+1. Reduce request pressure by narrowing the queried time window (smaller from/to)
+2. Ensure query filters are selective (add `RAPID7_QUERY`)
+3. If available, tune polling/backoff settings via service configuration (without violating provider guidance)
+4. Contact Rapid7 if you need a higher rate limit
 
 ---
 
-### Issue: Memory Usage High
+### Issue: Region misconfiguration / wrong base URL
 
 **Symptoms**:
-- Process memory > 1GB
-- Out of memory errors
-- System slowdown
+- DNS failures (cannot resolve `https://{region}.rest.logs.insight.rapid7.com`)
+- HTTP 404 on the query endpoint
 
 **Diagnosis**:
 ```bash
-# Check process memory
-ps aux | grep log_ingestion
-
-# Monitor memory over time
-watch -n 5 'ps aux | grep log_ingestion'
+# Sanity check the derived endpoint
+echo "https://${RAPID7_DATA_STORAGE_REGION}.rest.logs.insight.rapid7.com/query/logs/${RAPID7_LOG_KEY}"
 ```
 
 **Solutions**:
-1. **Reduce Batch Size**:
-   ```bash
-   BATCH_SIZE=500  # Reduce from 1000
-   ```
-
-2. **Process in Smaller Chunks**: Modify code to process incrementally
-
-3. **Increase System Memory**: Add RAM or adjust limits
-
-**Prevention**:
-- Profile memory usage with benchmark tests
-- Set memory limits with systemd:
-  ```ini
-  [Service]
-  MemoryMax=512M
-  ```
+1. Confirm the correct Rapid7 data storage region for your account
+2. Update `RAPID7_DATA_STORAGE_REGION`
+3. Restart the service
 
 ---
 
-### Issue: Parquet Files Not Readable
+### Issue: `python` command not found on macOS (use `python3`)
 
 **Symptoms**:
-- Pandas/Spark cannot read Parquet files
-- File corruption errors
-- Schema mismatch errors
+- Running `python -m ...` fails with: `bash: python: command not found`
 
-**Diagnosis**:
+**Root cause**:
+- On modern macOS installs, `python` is often not installed, or it’s intentionally absent.
+
+**Fix**:
+- Use `python3` explicitly for all commands.
+- In IntelliJ IDEA Run Configurations, pick the correct interpreter and run the module (not a shell command).
+
+---
+
+### Issue: urllib3 LibreSSL warning (`NotOpenSSLWarning`)
+
+You may see:
+- `urllib3 v2 only supports OpenSSL 1.1.1+ ... LibreSSL ...`
+
+**What it means**:
+- Your Python’s `ssl` module is linked against LibreSSL, which urllib3 warns about. This is common on Apple-system Python.
+
+**Mitigations** (choose one):
+1. Prefer a virtualenv created from a modern Python distribution (e.g., python.org installer) that links against OpenSSL.
+2. If this is dev-only and everything works, you can treat it as a warning (it doesn’t necessarily break functionality).
+
+---
+
+### Issue: 404 on `GET /management/logs`
+
+**Symptoms**:
+- Running `--select-log` fails with:
+  - `404 Client Error: Not Found for url: https://{region}.rest.logs.insight.rapid7.com/management/logs`
+
+**Likely causes**:
+1. Wrong `RAPID7_DATA_STORAGE_REGION` for your account.
+2. Base URL differs for your Rapid7 product/tenant (Rapid7 has multiple APIs and older docs sometimes show different paths).
+3. Network proxy / SSL interception rewriting traffic.
+
+**How to diagnose**:
+- Confirm the derived URL:
+
 ```bash
-# Validate Parquet file
-parquet-tools meta /data/logs/file.parquet
-
-# Try reading with pandas
-python -c "import pandas as pd; print(pd.read_parquet('/data/logs/file.parquet').head())"
+echo "https://${RAPID7_DATA_STORAGE_REGION}.rest.logs.insight.rapid7.com/management/logs"
 ```
 
-**Solutions**:
-1. **Corruption**: Delete and regenerate
-2. **Schema Issues**: Check schema consistency
-3. **Compression Issues**: Try different compression algorithm
+- If you have Rapid7 docs for your tenant, verify the correct host and path for the **management** API.
 
-**Prevention**:
-- Add file validation after write
-- Use checksums for integrity verification
+**What to do next**:
+- Try the same region in a browser (expect 401/403 without auth, but not 404).
+- If you have multiple regions, try `eu`, `us`, `ca`, `ap`, `au`.
+- If you can fetch logs via the Rapid7 UI/API Explorer, copy the exact management/logs URL shape and we’ll align the client.
 
 ---
 
@@ -774,7 +765,7 @@ chown logservice:logservice .env
 ## Support Contacts
 
 | Issue Type | Contact | Response Time |
-|------------|---------|---------------|
+|----------|---------|------------|
 | Service Down | On-Call Engineer | 15 minutes |
 | Configuration | Development Team | 1 business day |
 | API Issues | Rapid7 Support | 4 hours (SLA) |
@@ -824,12 +815,13 @@ echo "Archived $(ls -1 $ARCHIVE_DIR | wc -l) files"
 #!/bin/bash
 # test-config.sh
 
-python -c "
+python3 -c "
 from src.log_ingestion.config import LogIngestionConfig
 try:
     config = LogIngestionConfig()
     print('✅ Configuration valid')
-    print(f'API Endpoint: {config.rapid7_api_endpoint}')
+    print(f'Region: {config.rapid7_data_storage_region}')
+    print(f'Log Key: {config.rapid7_log_key}')
     print(f'Output Dir: {config.output_dir}')
     print(f'Batch Size: {config.batch_size}')
 except Exception as e:
@@ -837,6 +829,33 @@ except Exception as e:
     exit(1)
 "
 ```
+
+### Selecting a Log (setting `RAPID7_LOG_KEY`)
+
+Use the built-in helper to select a log set and then a log, and persist the chosen log id to your `.env` file.
+
+**Command**:
+
+```bash
+python3 -m src.log_ingestion.main \
+  --select-log \
+  --env-file .env \
+  --start-time "2026-02-10T00:00:00Z" \
+  --end-time "2026-02-10T00:00:01Z"
+```
+
+Notes:
+ - `--start-time/--end-time` are still required by the CLI parser, but are ignored when `--select-log` is provided.
+ - The helper calls the Log Search management endpoints:
+   - `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets`
+   - `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets/{logSetId}/logs`
+ - Auth is sent as `x-api-key: $RAPID7_API_KEY`.
+ - The `.env` file is updated in-place (comments and unrelated variables are preserved).
+
+Failure modes:
+ - **401/403**: API key invalid or lacks access. Confirm `RAPID7_API_KEY`.
+ - **429**: Rate limit exceeded; wait for reset and retry.
+ - **No log sets/logs shown**: Account/region mismatch; verify `RAPID7_DATA_STORAGE_REGION`.
 
 ---
 

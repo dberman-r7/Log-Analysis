@@ -13,80 +13,142 @@ import requests
 
 
 def test_api_client_constructs_auth_header():
-    """Test that API client creates proper authentication header"""
-    # Arrange
+    """Test that API client creates provider Log Search authentication header"""
     from src.log_ingestion.config import LogIngestionConfig
 
     config = LogIngestionConfig(
         rapid7_api_key="test_api_key_123",
-        rapid7_api_endpoint="https://api.example.com",
+        rapid7_log_key="logkey_1",
         output_dir="/tmp/test",
     )
 
-    # Act
     from src.log_ingestion.api_client import Rapid7ApiClient
 
     client = Rapid7ApiClient(config)
 
-    # Assert
-    assert "Authorization" in client.session.headers
-    assert client.session.headers["Authorization"] == "Bearer test_api_key_123"
-    assert client.session.headers["Content-Type"] == "application/json"
+    assert "x-api-key" in client.session.headers
+    assert client.session.headers["x-api-key"] == "test_api_key_123"
+    assert "Authorization" not in client.session.headers
 
 
 def test_api_client_fetches_logs_successfully():
-    """Test successful log fetch from API"""
-    # Arrange
+    """Test successful Log Search query fetch"""
     from src.log_ingestion.config import LogIngestionConfig
 
     config = LogIngestionConfig(
         rapid7_api_key="test_key",
-        rapid7_api_endpoint="https://api.example.com",
+        rapid7_log_key="logkey_1",
         output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
+        rapid7_query="",
     )
 
+    # First response returns completed result set (no Self link)
     mock_response = Mock()
     mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "text/csv"}
-    mock_response.text = """timestamp,level,message
-2026-02-10T10:00:00Z,INFO,Test log 1
-2026-02-10T10:00:01Z,INFO,Test log 2"""
+    mock_response.headers = {"Content-Type": "application/json"}
+    mock_response.json.return_value = {"events": [{"message": "hello"}]}
 
-    # Act
     from src.log_ingestion.api_client import Rapid7ApiClient
 
-    with patch("requests.Session.get", return_value=mock_response):
+    with patch("requests.Session.get", return_value=mock_response) as mock_get:
         client = Rapid7ApiClient(config)
         result = client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
 
-    # Assert
+    assert mock_get.call_count == 1
     assert isinstance(result, str)
-    assert "timestamp,level,message" in result
-    assert "Test log 1" in result
-    assert "Test log 2" in result
+    assert "events" in result
+
+
+def test_api_client_polls_self_until_complete():
+    """If API returns rel=Self, client should poll until completion"""
+    from src.log_ingestion.config import LogIngestionConfig
+
+    config = LogIngestionConfig(
+        rapid7_api_key="test_key",
+        rapid7_log_key="logkey_1",
+        output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
+    )
+
+    in_progress = Mock()
+    in_progress.status_code = 200
+    in_progress.headers = {"Content-Type": "application/json"}
+    in_progress.json.return_value = {
+        "links": [{"rel": "Self", "href": "https://cont/self"}]
+    }
+
+    completed = Mock()
+    completed.status_code = 200
+    completed.headers = {"Content-Type": "application/json"}
+    completed.json.return_value = {"events": [{"message": "done"}]}
+
+    from src.log_ingestion.api_client import Rapid7ApiClient
+
+    with patch("requests.Session.get") as mock_get, patch("time.sleep") as mock_sleep:
+        mock_get.side_effect = [in_progress, completed]
+        client = Rapid7ApiClient(config)
+        result = client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
+
+    assert mock_get.call_count == 2
+    assert mock_sleep.call_count >= 1
+    assert "events" in result
+
+
+def test_api_client_follows_next_page_links():
+    """If response contains rel=Next, client should fetch next pages"""
+    from src.log_ingestion.config import LogIngestionConfig
+
+    config = LogIngestionConfig(
+        rapid7_api_key="test_key",
+        rapid7_log_key="logkey_1",
+        output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
+    )
+
+    page1 = Mock()
+    page1.status_code = 200
+    page1.headers = {"Content-Type": "application/json"}
+    page1.json.return_value = {
+        "events": [{"message": "p1"}],
+        "links": [{"rel": "Next", "href": "https://cont/next"}],
+    }
+
+    page2 = Mock()
+    page2.status_code = 200
+    page2.headers = {"Content-Type": "application/json"}
+    page2.json.return_value = {"events": [{"message": "p2"}]}
+
+    from src.log_ingestion.api_client import Rapid7ApiClient
+
+    with patch("requests.Session.get") as mock_get:
+        mock_get.side_effect = [page1, page2]
+        client = Rapid7ApiClient(config)
+        result = client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
+
+    assert mock_get.call_count == 2
+    assert "p1" in result
+    assert "p2" in result
 
 
 def test_api_client_handles_401_unauthorized():
     """Test handling of authentication failure"""
-    # Arrange
     from src.log_ingestion.config import LogIngestionConfig
 
     config = LogIngestionConfig(
         rapid7_api_key="invalid_key",
-        rapid7_api_endpoint="https://api.example.com",
+        rapid7_log_key="logkey_1",
         output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
     )
 
     mock_response = Mock()
     mock_response.status_code = 401
 
-    # Create HTTPError with response attribute
     error_401 = requests.exceptions.HTTPError("401 Unauthorized")
     error_401.response = mock_response
-
     mock_response.raise_for_status.side_effect = error_401
 
-    # Act & Assert
     from src.log_ingestion.api_client import Rapid7ApiClient
 
     with patch("requests.Session.get", return_value=mock_response):
@@ -96,135 +158,48 @@ def test_api_client_handles_401_unauthorized():
 
 
 def test_api_client_handles_429_rate_limit():
-    """Test retry with exponential backoff on rate limit"""
-    # Arrange
+    """Handle 429 using X-RateLimit-Reset and retry"""
     from src.log_ingestion.config import LogIngestionConfig
 
     config = LogIngestionConfig(
         rapid7_api_key="test_key",
-        rapid7_api_endpoint="https://api.example.com",
+        rapid7_log_key="logkey_1",
         output_dir="/tmp/test",
-        retry_attempts=3,
+        rapid7_data_storage_region="eu",
     )
 
-    # First two calls return 429, third succeeds
-    mock_response_429 = Mock()
-    mock_response_429.status_code = 429
-    mock_response_429.headers = {"Retry-After": "1", "Content-Type": "text/csv"}
+    rate_limited = Mock()
+    rate_limited.status_code = 429
+    rate_limited.headers = {"X-RateLimit-Reset": "1"}
 
-    mock_response_200 = Mock()
-    mock_response_200.status_code = 200
-    mock_response_200.headers = {"Content-Type": "text/csv"}
-    mock_response_200.text = "timestamp,level,message\n"
+    completed = Mock()
+    completed.status_code = 200
+    completed.headers = {"Content-Type": "application/json"}
+    completed.json.return_value = {"events": []}
 
-    # Act
     from src.log_ingestion.api_client import Rapid7ApiClient
 
-    with patch("requests.Session.get") as mock_get:
-        mock_get.side_effect = [mock_response_429, mock_response_429, mock_response_200]
-
-        client = Rapid7ApiClient(config)
-        start_time = time.time()
-        result = client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
-        elapsed = time.time() - start_time
-
-        # Assert - should have retried and eventually succeeded
-        assert mock_get.call_count == 3
-        assert isinstance(result, str)
-        assert "timestamp,level,message" in result
-        # Should have waited (exponential backoff)
-        assert elapsed >= 1.0  # At least some delay
-
-
-def test_api_client_handles_500_server_error():
-    """Test retry logic on server errors"""
-    # Arrange
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_api_endpoint="https://api.example.com",
-        output_dir="/tmp/test",
-        retry_attempts=2,
-    )
-
-    mock_response_500 = Mock()
-    mock_response_500.status_code = 500
-    mock_response_500.headers = {"Content-Type": "text/csv"}
-
-    # Create HTTPError with response attribute
-    error_500 = requests.exceptions.HTTPError("500 Server Error")
-    error_500.response = mock_response_500
-
-    mock_response_500.raise_for_status.side_effect = error_500
-
-    mock_response_200 = Mock()
-    mock_response_200.status_code = 200
-    mock_response_200.headers = {"Content-Type": "text/csv"}
-    mock_response_200.text = "timestamp,level,message\n"
-
-    # Act
-    from src.log_ingestion.api_client import Rapid7ApiClient
-
-    with patch("requests.Session.get") as mock_get:
-        # First call fails, second succeeds
-        mock_get.side_effect = [mock_response_500, mock_response_200]
-
+    with patch("requests.Session.get") as mock_get, patch("time.sleep") as mock_sleep:
+        mock_get.side_effect = [rate_limited, completed]
         client = Rapid7ApiClient(config)
         result = client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
 
-        # Assert
-        assert mock_get.call_count == 2
-        assert isinstance(result, str)
-        assert "timestamp,level,message" in result
-
-
-def test_api_client_respects_rate_limiting():
-    """Test that client enforces rate limit"""
-    # Arrange
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_api_endpoint="https://api.example.com",
-        output_dir="/tmp/test",
-        rate_limit=120,  # 120 requests per minute = 2 per second
-    )
-
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"Content-Type": "text/csv"}
-    mock_response.text = "timestamp,level,message\n"
-
-    # Act
-    from src.log_ingestion.api_client import Rapid7ApiClient
-
-    with patch("requests.Session.get", return_value=mock_response):
-        client = Rapid7ApiClient(config)
-
-        # Make multiple requests quickly
-        start_time = time.time()
-        for _ in range(3):
-            client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
-        elapsed = time.time() - start_time
-
-        # Assert - should have rate limited (3 requests at 2/sec = ~1.5 seconds minimum)
-        # Being lenient with timing for CI environments
-        assert elapsed >= 0.5  # At least some rate limiting applied
+    assert mock_get.call_count == 2
+    mock_sleep.assert_called()
+    assert "events" in result
 
 
 def test_api_client_timeout_handling():
     """Test timeout configuration and handling"""
-    # Arrange
     from src.log_ingestion.config import LogIngestionConfig
 
     config = LogIngestionConfig(
         rapid7_api_key="test_key",
-        rapid7_api_endpoint="https://api.example.com",
+        rapid7_log_key="logkey_1",
         output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
     )
 
-    # Act & Assert
     from src.log_ingestion.api_client import Rapid7ApiClient
 
     with patch("requests.Session.get") as mock_get:
@@ -237,26 +212,81 @@ def test_api_client_timeout_handling():
 
 def test_api_client_handles_connection_error():
     """Test handling of network connection errors"""
-    # Arrange
     from src.log_ingestion.config import LogIngestionConfig
 
     config = LogIngestionConfig(
         rapid7_api_key="test_key",
-        rapid7_api_endpoint="https://api.example.com",
+        rapid7_log_key="logkey_1",
         output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
         retry_attempts=2,
     )
 
-    # Act & Assert
     from src.log_ingestion.api_client import Rapid7ApiClient
 
     with patch("requests.Session.get") as mock_get:
         mock_get.side_effect = requests.exceptions.ConnectionError("Network error")
 
         client = Rapid7ApiClient(config)
-        # Should retry and eventually raise
         with pytest.raises(requests.exceptions.ConnectionError):
             client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
 
-        # Should have retried
         assert mock_get.call_count >= 2
+
+
+def test_api_client_list_log_sets_success():
+    """REQ-016: list available log sets via management API."""
+    from unittest.mock import Mock, patch
+
+    from src.log_ingestion.config import LogIngestionConfig
+
+    config = LogIngestionConfig(
+        rapid7_api_key="test_key",
+        rapid7_log_key="logkey_1",
+        output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
+    )
+
+    resp = Mock()
+    resp.status_code = 200
+    resp.headers = {"Content-Type": "application/json"}
+    resp.json.return_value = {
+        "logsets": [
+            {"id": "ls-1", "name": "Set One", "description": "desc"},
+            {"id": "ls-2", "name": "Set Two"},
+        ]
+    }
+
+    from src.log_ingestion.api_client import Rapid7ApiClient
+
+    with patch("requests.Session.get", return_value=resp):
+        client = Rapid7ApiClient(config)
+        log_sets = client.list_log_sets()
+
+    assert len(log_sets) == 2
+    assert log_sets[0].id == "ls-1"
+    assert log_sets[0].name == "Set One"
+
+
+def test_api_client_list_logs_in_log_set_success():
+    """REQ-019: per-logset membership endpoints are unsupported; fail loudly."""
+    from unittest.mock import patch
+
+    from src.log_ingestion.api_client import Rapid7ApiClient
+    from src.log_ingestion.config import LogIngestionConfig
+
+    config = LogIngestionConfig(
+        rapid7_api_key="test_key",
+        rapid7_log_key="logkey_1",
+        output_dir="/tmp/test",
+        rapid7_data_storage_region="eu",
+    )
+
+    client = Rapid7ApiClient(config)
+
+    # Ensure no HTTP is attempted.
+    with patch.object(client, "_request_get", side_effect=AssertionError("network not allowed")):
+        with pytest.raises(ValueError) as exc:
+            client.list_logs_in_log_set("ls-1")
+
+    assert "logs_info" in str(exc.value)

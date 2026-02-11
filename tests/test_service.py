@@ -21,7 +21,7 @@ def test_service_orchestrates_complete_pipeline():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -66,7 +66,7 @@ def test_service_handles_api_errors():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -92,7 +92,7 @@ def test_service_handles_empty_logs():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -120,7 +120,7 @@ def test_service_handles_malformed_csv():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -155,7 +155,7 @@ def test_service_processes_batches():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
             batch_size=100,  # Min allowed batch size
         )
@@ -191,7 +191,7 @@ def test_service_initializes_components():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -225,7 +225,7 @@ def test_service_generates_partition_date():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -257,7 +257,7 @@ def test_service_logs_pipeline_events():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 

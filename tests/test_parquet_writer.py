@@ -20,7 +20,7 @@ def test_writer_creates_parquet_schema():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -58,7 +58,7 @@ def test_writer_writes_single_batch():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -95,7 +95,7 @@ def test_writer_writes_multiple_batches():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -139,7 +139,7 @@ def test_writer_partitions_by_date():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -186,7 +186,7 @@ def test_writer_applies_compression():
         # Test with snappy compression
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
             parquet_compression="snappy",
         )
@@ -225,7 +225,7 @@ def test_writer_validates_output_file():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -265,7 +265,7 @@ def test_writer_handles_empty_dataframe():
     with tempfile.TemporaryDirectory() as tmpdir:
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=tmpdir,
         )
 
@@ -295,7 +295,7 @@ def test_writer_creates_output_directory():
 
         config = LogIngestionConfig(
             rapid7_api_key="test_key",
-            rapid7_api_endpoint="https://api.example.com",
+            rapid7_log_key="test-log-key",
             output_dir=str(output_path),
         )
 
