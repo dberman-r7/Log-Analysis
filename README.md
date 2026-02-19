@@ -4,6 +4,56 @@ A comprehensive log analysis system with enterprise-grade governance and quality
 
 ---
 
+## 🤖 AI Agent Tools & Governance
+
+This repository includes comprehensive tooling for AI agents and developers to ensure governance compliance:
+
+### Kiro Steering Files
+
+Automatically loaded context for AI agents:
+- `.kiro/steering/governance-framework.md` - Core principles and quick reference
+- `.kiro/steering/change-management.md` - CR decision guidance
+- `.kiro/steering/tdd-requirements.md` - TDD practices
+- `.kiro/steering/security-requirements.md` - Security checklist
+- `.kiro/steering/implementation-plan-requirements.md` - Plan requirements
+
+### Agent Memory System
+
+- `.kiro/agent-memory.md` - Persistent context across sessions
+  - Recent decisions and rationale
+  - Common patterns and anti-patterns
+  - Project-specific conventions
+  - Lessons learned
+
+### Decision Trees
+
+Visual and text-based decision support:
+- `docs/processes/decision-trees/cr-required-decision-tree.md` - Is a CR required?
+- `docs/processes/decision-trees/dod-selector.md` - Which DoD items apply?
+- `docs/processes/decision-trees/adr-required-decision-tree.md` - Is an ADR required?
+
+### Helper Scripts
+
+```bash
+# Pre-flight governance check
+./scripts/governance-preflight.sh
+
+# Generate new CR with sequential ID
+./scripts/generate-cr-template.sh
+
+# Validate QIA format
+./scripts/validate-qia.sh docs/processes/implementation-plans/IP-*.md
+
+# Check implementation plan status
+./scripts/check-implementation-plan.sh
+```
+
+### Quick Reference
+
+- `docs/processes/governance-quick-reference.md` - One-page cheat sheet
+
+---
+
 ## 📋 Governance Framework
 
 This repository follows a comprehensive governance framework to ensure high-quality, maintainable, and reliable software development.

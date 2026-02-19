@@ -6,6 +6,8 @@
 
 This document defines the **mandatory governance framework** for all AI-assisted development in this repository.
 
+**Note**: Kiro AI agents automatically load steering files from `.kiro/steering/` which provide quick-reference versions of these rules. The steering files are designed for efficient context loading while this document remains the authoritative source.
+
 ---
 
 ## Core Principles

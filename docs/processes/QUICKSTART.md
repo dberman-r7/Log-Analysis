@@ -11,8 +11,9 @@ This is your TL;DR guide to working in this repository. For complete details, se
 ### Before You Start ANY Work
 
 1. **Read**: [`.github/copilot-instructions.md`](../../.github/copilot-instructions.md) (at least skim it)
-2. **Understand**: Some changes require a CR + ATP gate; all changes require PRs
-3. **Remember**: Tests before code (TDD), always
+2. **Run pre-flight check**: `./scripts/governance-preflight.sh` (if available)
+3. **Understand**: Some changes require a CR + ATP gate; all changes require PRs
+4. **Remember**: Tests before code (TDD), always
 
 ### The Basic Workflow
 
@@ -20,6 +21,7 @@ This is your TL;DR guide to working in this repository. For complete details, se
 1. User makes request
 2. Perform a Quick Impact Assessment (QIA)
    - Decide: Standard Change (no CR) vs Governed Change (CR required)
+   - Use decision tree: docs/processes/decision-trees/cr-required-decision-tree.md
 3. Create/update an Implementation Plan (required for code changes)
 4a. If CR-required: create CR + IA and wait for ATP
 4b. If not CR-required: follow Standard Change Path (REQ traceability + TDD)
@@ -28,6 +30,37 @@ This is your TL;DR guide to working in this repository. For complete details, se
 ```
 
 **DO NOT START IMPLEMENTATION FOR CR-REQUIRED CHANGES WITHOUT ATP.**
+
+---
+
+## 🛠️ Governance Tools
+
+### Helper Scripts
+
+```bash
+# Pre-flight check before starting work
+./scripts/governance-preflight.sh
+
+# Generate new CR
+./scripts/generate-cr-template.sh
+
+# Validate QIA format
+./scripts/validate-qia.sh <implementation-plan-file>
+
+# Check implementation plan status
+./scripts/check-implementation-plan.sh
+```
+
+### Decision Trees
+
+Quick visual guides:
+- **CR Required?**: `docs/processes/decision-trees/cr-required-decision-tree.md`
+- **DoD Items?**: `docs/processes/decision-trees/dod-selector.md`
+- **ADR Required?**: `docs/processes/decision-trees/adr-required-decision-tree.md`
+
+### Quick Reference
+
+- **One-page cheat sheet**: `docs/processes/governance-quick-reference.md`
 
 ---
 
