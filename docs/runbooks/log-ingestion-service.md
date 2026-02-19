@@ -3,7 +3,7 @@
 **Service Name**: log-ingestion-service  
 **Version**: 0.1.0  
 **Owner**: Development Team  
-**Last Updated**: 2026-02-10
+**Last Updated**: 2026-02-16
 
 ---
 
@@ -14,6 +14,8 @@
 The Log Ingestion Service pulls logs from the Rapid7 InsightOps **Log Search** API and stores them in Apache Parquet format for analytics. It provides:
 - Automated log extraction from Rapid7
 - Efficient Parquet file storage with compression
+- Local Parquet **segment cache** keyed by log + time window to avoid refetching
+- Streaming ingestion with periodic Parquet flush to bound memory
 - Structured logging and metrics
 
 ### Architecture
@@ -167,6 +169,8 @@ Optional:
 | `RATE_LIMIT` | Max API requests/minute | `60` | `1` - `1000` |
 | `RETRY_ATTEMPTS` | Max retry attempts | `3` | `1` - `10` |
 | `PARQUET_COMPRESSION` | Compression algorithm | `snappy` | `snappy`, `gzip`, `brotli`, `none` |
+| `BYPASS_CACHE` | If `true`, ignore local parquet segment cache and always fetch from API | `false` | `true`, `false` |
+| `FLUSH_ROWS` | Flush buffered events as Parquet part files every N rows (bounds memory usage) | `10000` | `1` - `5000000` |
 
 ### Configuration File: `.env`
 
@@ -226,112 +230,393 @@ The provider Log Search API is asynchronous and link-driven.
 4. When a page is complete, the client follows `Next` (if present) to fetch subsequent pages.
 5. If the API returns **HTTP 429**, the client waits for the number of seconds in the `X-RateLimit-Reset` header, then retries.
 
-### Starting the Service
+### Parquet segment cache (REQ-023, REQ-024, REQ-028)
 
-#### One-Time Execution
+To avoid re-downloading the same log/time window repeatedly, the service maintains a local cache of parquet **segment datasets**.
 
-For manual, one-time log extraction:
+**Key behaviors**:
+- **Cache hit**: requested window is fully covered by one or more cached segments; no API calls are made.
+- **Cache miss**: no cached coverage; service fetches the whole requested window.
+- **Cache partial**: some coverage exists; service computes missing subranges (supports multiple gaps) and fetches only the missing subranges.
+
+**Directory layout** (conceptual):
+
+- `CACHE_DIR/<log_id>/<start_ms>-<end_ms>/part-00000.parquet`
+- Each segment directory is a parquet *dataset* (one or more `part-*.parquet`).
+
+Operational notes:
+- If you request the same log + overlapping time range repeatedly, subsequent runs should be faster and cheaper.
+- If you suspect corruption, you can delete the affected segment directory; the next run will refetch.
+- If cache reading fails and `BYPASS_CACHE=false`, the service fails loudly (structured ERROR) to avoid silent data loss.
+
+### Streaming flush + memory bounding (REQ-028)
+
+LogSearch JSON responses are processed page-by-page. Events are buffered and then flushed periodically to parquet.
+
+Settings:
+- `FLUSH_ROWS` controls when a flush happens. Smaller values reduce peak memory but create more parquet part files.
+
+**Flush events**:
+- `flush_start` / `flush_complete` include `rows_buffered`, `rows_written`, `segment_dir`, and `part_index`.
+
+### Structured log events for cache + performance triage
+
+Key cache decision events:
+- `cache_hit`: includes `requested_start_ms`, `requested_end_ms`, `segments_used`
+- `cache_miss`: includes `requested_start_ms`, `requested_end_ms`
+- `cache_partial`: includes `missing_ranges` and `segments_used`
+
+Subrange fetch events:
+- `fetch_subrange_complete`: includes `duration_ms`, `rows_fetched`, `parts_written`
+
+Parquet write events:
+- `parquet_part_write_success`: includes `output_file`, `num_rows`
+
+Summary events:
+- `parquet_summary_generated`: includes `row_count`, `columns`, and timestamp aggregates (when available)
+
+Troubleshooting quick checks:
+- Seeing `cache_miss` every run? Confirm `CACHE_DIR` is stable and writable (and `BYPASS_CACHE` isn’t set).
+- Seeing many `cache_partial` with many small `missing_ranges`? Consider larger request windows or allowing the cache to warm.
+- High memory usage? Lower `FLUSH_ROWS`.
+
+---
+
+## Quick Reference
+
+### Service Status
 
 ```bash
-# Activate virtual environment
-source venv/bin/activate
+# Check if service is running
+ps aux | grep log_ingestion
 
-# Run service
-python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z"
+# Check recent logs
+tail -f /var/log/log-ingestion/service.log
+
+# Check output files
+ls -lh /data/logs/*.parquet
 ```
 
-#### Background Service
-
-For continuous operation:
+### Common Commands
 
 ```bash
-# Start in background
+# Start service (one-time run)
+python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z"
+
+# Start service (background)
 nohup python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z" > /var/log/log-ingestion/service.log 2>&1 &
 
-# Save PID
-echo $! > /var/run/log-ingestion.pid
+# Stop service
+kill -SIGTERM <PID>
+
+# Check configuration
+python3 -c "from src.log_ingestion.config import LogIngestionConfig; print(LogIngestionConfig())"
 ```
 
-#### Systemd Service (Recommended for Production)
+---
 
-Create `/etc/systemd/system/log-ingestion.service`:
+## Configuration Reference
 
-```ini
-[Unit]
-Description=Rapid7 Log Ingestion Service
-After=network.target
+### Required Environment Variables
 
-[Service]
-Type=simple
-User=logservice
-Group=logservice
-WorkingDirectory=/opt/log-analysis
-Environment="PATH=/opt/log-analysis/venv/bin"
-EnvironmentFile=/opt/log-analysis/.env
-ExecStart=/opt/log-analysis/venv/bin/python -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z"
-Restart=on-failure
-RestartSec=10
-StandardOutput=append:/var/log/log-ingestion/service.log
-StandardError=append:/var/log/log-ingestion/error.log
+| Variable | Description | Example | Required |
+|----------|-------------|---------|----------|
+| `RAPID7_API_KEY` | API authentication key (sent as `x-api-key`) | `abc123...` | ✅ Yes |
+| `RAPID7_DATA_STORAGE_REGION` | Rapid7 data storage region used to construct the Log Search base URL | `us` | ✅ Yes |
+| `RAPID7_LOG_KEY` | Log key used in the Log Search endpoint path | `your-log-key` | ✅ Yes |
 
-[Install]
-WantedBy=multi-user.target
-```
+Optional:
+- `OUTPUT_DIR` (defaults to `./data/logs`)
 
-Then:
+### Optional Environment Variables
+
+| Variable | Description | Default | Valid Values |
+|----------|-------------|---------|--------------|
+| `RAPID7_QUERY` | Log Search query filter (provider query language) | *(empty / provider default)* | provider-specific string |
+| `LOG_LEVEL` | Logging verbosity | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `BATCH_SIZE` | Records per batch | `1000` | `100` - `10000` |
+| `RATE_LIMIT` | Max API requests/minute | `60` | `1` - `1000` |
+| `RETRY_ATTEMPTS` | Max retry attempts | `3` | `1` - `10` |
+| `PARQUET_COMPRESSION` | Compression algorithm | `snappy` | `snappy`, `gzip`, `brotli`, `none` |
+| `BYPASS_CACHE` | If `true`, ignore local parquet segment cache and always fetch from API | `false` | `true`, `false` |
+| `FLUSH_ROWS` | Flush buffered events as Parquet part files every N rows (bounds memory usage) | `10000` | `1` - `5000000` |
+
+### Configuration File: `.env`
 
 ```bash
-# Reload systemd
-sudo systemctl daemon-reload
+# Required
+RAPID7_API_KEY=your_api_key_here
+RAPID7_DATA_STORAGE_REGION=us
+RAPID7_LOG_KEY=your_log_key_here
 
-# Start service
-sudo systemctl start log-ingestion
+# Optional (defaults to ./data/logs)
+OUTPUT_DIR=./data/logs
 
-# Enable on boot
-sudo systemctl enable log-ingestion
-
-# Check status
-sudo systemctl status log-ingestion
+# Optional
+RAPID7_QUERY=where(message contains \"error\")
+LOG_LEVEL=INFO
+BATCH_SIZE=1000
+RATE_LIMIT=60
+RETRY_ATTEMPTS=3
+PARQUET_COMPRESSION=snappy
 ```
 
-#### Cron Job (Scheduled Execution)
+**Important**:
+- Never commit `.env` to git.
+- Don’t hardcode API keys in scripts or shell history. Prefer loading from `.env` or your secret manager.
 
-For periodic execution (e.g., hourly):
+> Note (macOS/dev): `OUTPUT_DIR` now defaults to `./data/logs` to avoid writing to read-only paths like `/data`.
+> You can still override it (for example, `OUTPUT_DIR=/tmp/logs`).
+
+---
+
+## Operations
+
+### Rapid7 Log Search request lifecycle (operational model)
+
+The provider Log Search API is asynchronous and link-driven.
+
+**Base URL** (derived from region):
+- `https://{region}.rest.logs.insight.rapid7.com`
+
+**Query endpoint** (derived from region + log key):
+- `GET https://{region}.rest.logs.insight.rapid7.com/query/logs/{log_key}`
+
+**Management endpoints**:
+- List log sets: `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets`
+- List logs (legacy / flat): `GET https://{region}.rest.logs.insight.rapid7.com/management/logs`
+- List logs in a log set: `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets/{logSetId}/logs`
+
+**Auth**:
+- Requests include `x-api-key: $RAPID7_API_KEY`
+
+**Lifecycle**:
+1. **Submit** a query request with query params (`from`, `to`, `query`).
+2. The response includes a `links` array.
+   - `rel=Self`: continuation link used for **polling** while the query is still running.
+   - `rel=Next`: link to the **next page** of results.
+3. The client polls the `Self` link with bounded exponential backoff until the query completes.
+4. When a page is complete, the client follows `Next` (if present) to fetch subsequent pages.
+5. If the API returns **HTTP 429**, the client waits for the number of seconds in the `X-RateLimit-Reset` header, then retries.
+
+### Parquet segment cache (REQ-023, REQ-024, REQ-028)
+
+To avoid re-downloading the same log/time window repeatedly, the service maintains a local cache of parquet **segment datasets**.
+
+**Key behaviors**:
+- **Cache hit**: requested window is fully covered by one or more cached segments; no API calls are made.
+- **Cache miss**: no cached coverage; service fetches the whole requested window.
+- **Cache partial**: some coverage exists; service computes missing subranges (supports multiple gaps) and fetches only the missing subranges.
+
+**Directory layout** (conceptual):
+
+- `CACHE_DIR/<log_id>/<start_ms>-<end_ms>/part-00000.parquet`
+- Each segment directory is a parquet *dataset* (one or more `part-*.parquet`).
+
+Operational notes:
+- If you request the same log + overlapping time range repeatedly, subsequent runs should be faster and cheaper.
+- If you suspect corruption, you can delete the affected segment directory; the next run will refetch.
+- If cache reading fails and `BYPASS_CACHE=false`, the service fails loudly (structured ERROR) to avoid silent data loss.
+
+### Streaming flush + memory bounding (REQ-028)
+
+LogSearch JSON responses are processed page-by-page. Events are buffered and then flushed periodically to parquet.
+
+Settings:
+- `FLUSH_ROWS` controls when a flush happens. Smaller values reduce peak memory but create more parquet part files.
+
+**Flush events**:
+- `flush_start` / `flush_complete` include `rows_buffered`, `rows_written`, `segment_dir`, and `part_index`.
+
+### Structured log events for cache + performance triage
+
+Key cache decision events:
+- `cache_hit`: includes `requested_start_ms`, `requested_end_ms`, `segments_used`
+- `cache_miss`: includes `requested_start_ms`, `requested_end_ms`
+- `cache_partial`: includes `missing_ranges` and `segments_used`
+
+Subrange fetch events:
+- `fetch_subrange_complete`: includes `duration_ms`, `rows_fetched`, `parts_written`
+
+Parquet write events:
+- `parquet_part_write_success`: includes `output_file`, `num_rows`
+
+Summary events:
+- `parquet_summary_generated`: includes `row_count`, `columns`, and timestamp aggregates (when available)
+
+Troubleshooting quick checks:
+- Seeing `cache_miss` every run? Confirm `CACHE_DIR` is stable and writable (and `BYPASS_CACHE` isn’t set).
+- Seeing many `cache_partial` with many small `missing_ranges`? Consider larger request windows or allowing the cache to warm.
+- High memory usage? Lower `FLUSH_ROWS`.
+
+---
+
+## Quick Reference
+
+### Service Status
 
 ```bash
-# Edit crontab
-crontab -e
+# Check if service is running
+ps aux | grep log_ingestion
 
-# Add entry (runs every hour)
-0 * * * * /opt/log-analysis/venv/bin/python -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z" >> /var/log/log-ingestion/cron.log 2>&1
+# Check recent logs
+tail -f /var/log/log-ingestion/service.log
+
+# Check output files
+ls -lh /data/logs/*.parquet
 ```
 
-### Stopping the Service
+### Common Commands
 
 ```bash
-# If running in foreground: Ctrl+C
+# Start service (one-time run)
+python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z"
 
-# If running in background with PID file
-kill -SIGTERM $(cat /var/run/log-ingestion.pid)
+# Start service (background)
+nohup python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z" > /var/log/log-ingestion/service.log 2>&1 &
 
-# With systemd
-sudo systemctl stop log-ingestion
+# Stop service
+kill -SIGTERM <PID>
 
-# Force kill (not recommended)
-pkill -f "python3 -m src.log_ingestion.main"
+# Check configuration
+python3 -c "from src.log_ingestion.config import LogIngestionConfig; print(LogIngestionConfig())"
 ```
 
-### Restarting the Service
+---
+
+## Configuration Reference
+
+### Required Environment Variables
+
+| Variable | Description | Example | Required |
+|----------|-------------|---------|----------|
+| `RAPID7_API_KEY` | API authentication key (sent as `x-api-key`) | `abc123...` | ✅ Yes |
+| `RAPID7_DATA_STORAGE_REGION` | Rapid7 data storage region used to construct the Log Search base URL | `us` | ✅ Yes |
+| `RAPID7_LOG_KEY` | Log key used in the Log Search endpoint path | `your-log-key` | ✅ Yes |
+
+Optional:
+- `OUTPUT_DIR` (defaults to `./data/logs`)
+
+### Optional Environment Variables
+
+| Variable | Description | Default | Valid Values |
+|----------|-------------|---------|--------------|
+| `RAPID7_QUERY` | Log Search query filter (provider query language) | *(empty / provider default)* | provider-specific string |
+| `LOG_LEVEL` | Logging verbosity | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `BATCH_SIZE` | Records per batch | `1000` | `100` - `10000` |
+| `RATE_LIMIT` | Max API requests/minute | `60` | `1` - `1000` |
+| `RETRY_ATTEMPTS` | Max retry attempts | `3` | `1` - `10` |
+| `PARQUET_COMPRESSION` | Compression algorithm | `snappy` | `snappy`, `gzip`, `brotli`, `none` |
+| `BYPASS_CACHE` | If `true`, ignore local parquet segment cache and always fetch from API | `false` | `true`, `false` |
+| `FLUSH_ROWS` | Flush buffered events as Parquet part files every N rows (bounds memory usage) | `10000` | `1` - `5000000` |
+
+### Configuration File: `.env`
 
 ```bash
-# Systemd
-sudo systemctl restart log-ingestion
+# Required
+RAPID7_API_KEY=your_api_key_here
+RAPID7_DATA_STORAGE_REGION=us
+RAPID7_LOG_KEY=your_log_key_here
 
-# Manual
-kill -SIGTERM $(cat /var/run/log-ingestion.pid)
-sleep 2
-python3 -m src.log_ingestion.main --start-time "2026-02-10T00:00:00Z" --end-time "2026-02-10T01:00:00Z" &
+# Optional (defaults to ./data/logs)
+OUTPUT_DIR=./data/logs
+
+# Optional
+RAPID7_QUERY=where(message contains \"error\")
+LOG_LEVEL=INFO
+BATCH_SIZE=1000
+RATE_LIMIT=60
+RETRY_ATTEMPTS=3
+PARQUET_COMPRESSION=snappy
 ```
+
+**Important**:
+- Never commit `.env` to git.
+- Don’t hardcode API keys in scripts or shell history. Prefer loading from `.env` or your secret manager.
+
+> Note (macOS/dev): `OUTPUT_DIR` now defaults to `./data/logs` to avoid writing to read-only paths like `/data`.
+> You can still override it (for example, `OUTPUT_DIR=/tmp/logs`).
+
+---
+
+## Operations
+
+### Rapid7 Log Search request lifecycle (operational model)
+
+The provider Log Search API is asynchronous and link-driven.
+
+**Base URL** (derived from region):
+- `https://{region}.rest.logs.insight.rapid7.com`
+
+**Query endpoint** (derived from region + log key):
+- `GET https://{region}.rest.logs.insight.rapid7.com/query/logs/{log_key}`
+
+**Management endpoints**:
+- List log sets: `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets`
+- List logs (legacy / flat): `GET https://{region}.rest.logs.insight.rapid7.com/management/logs`
+- List logs in a log set: `GET https://{region}.rest.logs.insight.rapid7.com/management/logsets/{logSetId}/logs`
+
+**Auth**:
+- Requests include `x-api-key: $RAPID7_API_KEY`
+
+**Lifecycle**:
+1. **Submit** a query request with query params (`from`, `to`, `query`).
+2. The response includes a `links` array.
+   - `rel=Self`: continuation link used for **polling** while the query is still running.
+   - `rel=Next`: link to the **next page** of results.
+3. The client polls the `Self` link with bounded exponential backoff until the query completes.
+4. When a page is complete, the client follows `Next` (if present) to fetch subsequent pages.
+5. If the API returns **HTTP 429**, the client waits for the number of seconds in the `X-RateLimit-Reset` header, then retries.
+
+### Parquet segment cache (REQ-023, REQ-024, REQ-028)
+
+To avoid re-downloading the same log/time window repeatedly, the service maintains a local cache of parquet **segment datasets**.
+
+**Key behaviors**:
+- **Cache hit**: requested window is fully covered by one or more cached segments; no API calls are made.
+- **Cache miss**: no cached coverage; service fetches the whole requested window.
+- **Cache partial**: some coverage exists; service computes missing subranges (supports multiple gaps) and fetches only the missing subranges.
+
+**Directory layout** (conceptual):
+
+- `CACHE_DIR/<log_id>/<start_ms>-<end_ms>/part-00000.parquet`
+- Each segment directory is a parquet *dataset* (one or more `part-*.parquet`).
+
+Operational notes:
+- If you request the same log + overlapping time range repeatedly, subsequent runs should be faster and cheaper.
+- If you suspect corruption, you can delete the affected segment directory; the next run will refetch.
+- If cache reading fails and `BYPASS_CACHE=false`, the service fails loudly (structured ERROR) to avoid silent data loss.
+
+### Streaming flush + memory bounding (REQ-028)
+
+LogSearch JSON responses are processed page-by-page. Events are buffered and then flushed periodically to parquet.
+
+Settings:
+- `FLUSH_ROWS` controls when a flush happens. Smaller values reduce peak memory but create more parquet part files.
+
+**Flush events**:
+- `flush_start` / `flush_complete` include `rows_buffered`, `rows_written`, `segment_dir`, and `part_index`.
+
+### Structured log events for cache + performance triage
+
+Key cache decision events:
+- `cache_hit`: includes `requested_start_ms`, `requested_end_ms`, `segments_used`
+- `cache_miss`: includes `requested_start_ms`, `requested_end_ms`
+- `cache_partial`: includes `missing_ranges` and `segments_used`
+
+Subrange fetch events:
+- `fetch_subrange_complete`: includes `duration_ms`, `rows_fetched`, `parts_written`
+
+Parquet write events:
+- `parquet_part_write_success`: includes `output_file`, `num_rows`
+
+Summary events:
+- `parquet_summary_generated`: includes `row_count`, `columns`, and timestamp aggregates (when available)
+
+Troubleshooting quick checks:
+- Seeing `cache_miss` every run? Confirm `CACHE_DIR` is stable and writable (and `BYPASS_CACHE` isn’t set).
+- Seeing many `cache_partial` with many small `missing_ranges`? Consider larger request windows or allowing the cache to warm.
+- High memory usage? Lower `FLUSH_ROWS`.
 
 ---
 
@@ -371,16 +656,38 @@ Logs are written in JSON format to stdout/stderr:
 **Key Log Events**:
 - `service_started`: Service initialization
 - `config_loaded`: Configuration loaded successfully
-- `api_request`: API call initiated
-- `api_response`: API call completed
-- `logs_fetched`: Logs retrieved from API
-- `transform_start`: JSON-to-tabular transformation started
-- `transform_complete`: Transformation finished
-- `file_write_start`: Parquet write started
-- `file_write_complete`: File written successfully
-- `batch_complete`: Batch processing finished
+- `pipeline_start`: pipeline started (includes requested window)
+- Cache decisions: `cache_hit`, `cache_miss`, `cache_partial`
+- Streaming flush: `flush_start`, `flush_complete`
+- `pipeline_empty_data`: no data available for requested window
 - `service_complete`: Service run completed
 - `error`: Error occurred (includes details)
+
+## Observability: confirming forward progress
+
+When running the pipeline, these structured log events indicate healthy progress through Log Search results:
+
+1. Fetch start:
+   - `pipeline_fetch_start`
+   - `logsearch_fetch_start` (includes `fetch_id`)
+   - `logsearch_query_submitted`
+
+2. Polling progress (while a page is still computing):
+   - `logsearch_poll_start`
+   - repeated `logsearch_poll_progress` (every N polls)
+   - `logsearch_poll_complete`
+
+3. Pagination progress (pages being collected):
+   - `logsearch_next_page_fetch` (for page 2+)
+   - `logsearch_page_complete` (after each page; includes `page_num`, `event_count`, `has_next`)
+
+4. Fetch completion:
+   - `logsearch_fetch_complete` (totals: `pages`, `events_total`, `duration_ms`)
+   - `pipeline_fetch_complete`
+
+### Troubleshooting
+- If you see `logsearch_poll_start` but no `logsearch_poll_progress` for a long time, verify `POLL_PROGRESS_LOG_EVERY` and consider a smaller value for long-running queries.
+- If pagination loops, the client will emit `logsearch_pagination_not_advancing` and raise an error rather than silently looping.
 
 ### Health Checks
 
@@ -866,6 +1173,6 @@ Failure modes:
 
 ---
 
-**Runbook Version**: 1.0  
-**Last Updated**: 2026-02-10  
-**Next Review**: 2026-05-10
+**Runbook Version**: 1.1  
+**Last Updated**: 2026-02-16  
+**Next Review**: 2026-05-16

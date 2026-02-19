@@ -161,3 +161,51 @@ def test_config_defaults_output_dir_when_not_set(monkeypatch, tmp_path):
     # Should be a relative directory (repo-local) by default.
     assert not config.output_dir.is_absolute()
 
+
+def test_config_defaults_rapid7_per_page(monkeypatch):
+    """REQ-028: per_page should default to 500 to preserve current behavior."""
+    monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
+    monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
+    monkeypatch.delenv("RAPID7_PER_PAGE", raising=False)
+
+    from src.log_ingestion.config import LogIngestionConfig
+
+    config = LogIngestionConfig()
+    assert config.rapid7_per_page == 500
+
+
+def test_config_accepts_valid_rapid7_per_page(monkeypatch):
+    """REQ-028: per_page override should be accepted within bounds."""
+    monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
+    monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
+    monkeypatch.setenv("RAPID7_PER_PAGE", "250")
+
+    from src.log_ingestion.config import LogIngestionConfig
+
+    config = LogIngestionConfig()
+    assert config.rapid7_per_page == 250
+
+
+def test_config_rejects_invalid_rapid7_per_page(monkeypatch):
+    """REQ-028: invalid per_page values must fail loudly."""
+    monkeypatch.setenv("RAPID7_API_KEY", "test_key_123")
+    monkeypatch.setenv("RAPID7_LOG_KEY", "log-key-123")
+    monkeypatch.setenv("OUTPUT_DIR", "/tmp/test_output")
+
+    from pydantic import ValidationError
+    from src.log_ingestion.config import LogIngestionConfig
+
+    monkeypatch.setenv("RAPID7_PER_PAGE", "0")
+    with pytest.raises(ValidationError):
+        LogIngestionConfig()
+
+    monkeypatch.setenv("RAPID7_PER_PAGE", "999999")
+    with pytest.raises(ValidationError):
+        LogIngestionConfig()
+
+    monkeypatch.setenv("RAPID7_PER_PAGE", "not-an-int")
+    with pytest.raises(ValidationError):
+        LogIngestionConfig()
+

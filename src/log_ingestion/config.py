@@ -52,10 +52,26 @@ class LogIngestionConfig(BaseSettings):
         alias="RAPID7_QUERY",
     )
 
+    rapid7_per_page: int = Field(
+        default=500,
+        description=(
+            "Log Search page size (provider 'per_page'). Defaults to 500 to preserve existing behavior."
+        ),
+        ge=1,
+        le=500,
+        alias="RAPID7_PER_PAGE",
+    )
+
     output_dir: Path = Field(
         default=Path("data") / "logs",
         description="Directory where Parquet files will be written (default: ./data/logs)",
         alias="OUTPUT_DIR",
+    )
+
+    cache_dir: Path = Field(
+        default=Path("data") / "cache",
+        description="Root directory for parquet cache segments (default: ./data/cache)",
+        alias="LOG_INGESTION_CACHE_DIR",
     )
 
     # Optional configuration with defaults
@@ -89,10 +105,58 @@ class LogIngestionConfig(BaseSettings):
         alias="RETRY_ATTEMPTS",
     )
 
+    # Polling guardrails (Log Search continuation polling)
+    poll_max_wall_seconds: int = Field(
+        default=8 * 60,
+        description="Maximum wall-clock seconds to poll Log Search continuation URLs before failing",
+        ge=5,
+        le=60 * 60,
+        alias="POLL_MAX_WALL_SECONDS",
+    )
+
+    poll_max_iterations: int = Field(
+        default=120,
+        description="Maximum number of polling iterations for Log Search continuation URLs before failing",
+        ge=1,
+        le=10_000,
+        alias="POLL_MAX_ITERATIONS",
+    )
+
+    poll_progress_log_every: int = Field(
+        default=5,
+        description="Emit an INFO progress log every N poll iterations (0 disables)",
+        ge=0,
+        le=10_000,
+        alias="POLL_PROGRESS_LOG_EVERY",
+    )
+
     parquet_compression: Literal["snappy", "gzip", "brotli", "none"] = Field(
         default="snappy",
         description="Compression algorithm for Parquet files",
         alias="PARQUET_COMPRESSION",
+    )
+
+    bypass_cache: bool = Field(
+        default=False,
+        description="If true, ignore local cache and fetch full window from API",
+        alias="BYPASS_CACHE",
+    )
+
+    flush_rows: int = Field(
+        default=10_000,
+        description="Flush buffered events to parquet after N rows to bound memory",
+        ge=1,
+        le=5_000_000,
+        alias="FLUSH_ROWS",
+    )
+
+    dedupe_events: bool = Field(
+        default=True,
+        description=(
+            "If true, de-duplicate Log Search events by (log_id, sequence_number/sequence_number_str) "
+            "across pages/segments to prevent over-counting and duplicate parquet rows."
+        ),
+        alias="DEDUPE_EVENTS",
     )
 
     model_config = SettingsConfigDict(

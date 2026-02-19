@@ -1,10 +1,10 @@
 # System Instruction Set - AI Governance Framework
 
-> **Version:** 1.0.0  
-> **Last Updated:** 2026-02-09  
+> **Version:** 1.1.0  
+> **Last Updated:** 2026-02-11  
 > **Status:** ACTIVE
 
-This document defines the **mandatory governance framework** for all AI-assisted development in this repository. Every interaction must follow these protocols without exception.
+This document defines the **mandatory governance framework** for all AI-assisted development in this repository.
 
 ---
 
@@ -21,109 +21,85 @@ Observability must be implemented so that failures are immediately obvious in lo
 
 ---
 
-## 1. The Governance Framework: Change Management Loop
+## 1. The Governance Framework: Change Management
 
-### Mandatory Process for Every User Request
+### Source of Truth
 
-For **every** user request, you must execute the following Change Management Loop before any implementation:
+- **Change classification + CR triggers** live in: `docs/processes/change-management.md`
+- **Definition of Done (DoD)** lives in: `docs/processes/definition-of-done.md`
 
-#### Step 1: Generate a Change Request (CR)
+If this file conflicts with those documents, treat `docs/processes/change-management.md` as authoritative.
 
-1. **Assign a Unique CR ID**: Format: `CR-YYYY-MM-DD-XXX` (e.g., `CR-2026-02-09-001`)
-2. **Document the CR** in `/docs/processes/change-requests/CR-[ID].md`
-3. **CR Contents Must Include**:
-   - **Title**: Brief description of the change
-   - **Requestor**: User or system initiating the request
-   - **Date**: Timestamp of request
-   - **Category**: [FEATURE, BUG, REFACTOR, SECURITY, PERFORMANCE, DOCUMENTATION]
-   - **Priority**: [P0-CRITICAL, P1-HIGH, P2-MEDIUM, P3-LOW]
-   - **Description**: Detailed explanation of what is being requested
-   - **Business Justification**: Why this change is needed
-   - **Affected Components**: List of systems/modules/files impacted
+---
 
-#### Step 2: Perform an Impact Assessment (IA)
+### Mandatory Process for Every User Request / Work Item
 
-Analyze the **Blast Radius** of the proposed change:
+Before any implementation work, you must do the following **in order**:
 
-1. **Code Impact**:
-   - Files to be created/modified/deleted
-   - Dependencies affected
-   - API surface changes
-   - Breaking changes (YES/NO)
-   
-2. **Security Impact**:
-   - Authentication/Authorization changes
-   - Data exposure risks
-   - Secret management implications
-   - Compliance requirements (GDPR, SOC2, etc.)
-   
-3. **Performance Impact**:
-   - Expected latency changes
-   - Resource consumption (CPU, Memory, Disk, Network)
-   - Scalability implications
-   - Database query impact
-   
-4. **Testing Impact**:
-   - New tests required
-   - Existing tests to modify
-   - Integration test implications
-   
-5. **Documentation Impact**:
-   - RTM updates required
-   - ADR creation/modification needed
-   - README/API doc updates
-   - Runbook/operational guide updates
+#### Step 0: Quick Impact Assessment (QIA) (REQUIRED for all work)
 
-#### Step 3: Draft an Implementation Plan
+A QIA is a short blast-radius check to decide whether the work is a **Standard Change (no CR)** or a **Governed Change (CR required)**.
 
-Create a **step-by-step checklist** that includes:
+QIA must answer, at minimum:
+- **Functional change?** (YES/NO)
+  - YES if the change alters externally observable behavior (outputs, CLI/API semantics, config meaning, persistence formats), modifies an existing REQ, changes pagination/correctness, or changes error-handling semantics in a way callers/users can observe.
+- **Touches any CR-required triggers?** (YES/NO)
+  - Requirements change, major approach change, architecture change, security-impacting, performance/SLO-impacting, breaking change, or large blast radius.
+- **CR required?** (YES/NO) with a one-sentence rationale.
 
-1. **Pre-Implementation Tasks**:
-   - [ ] Requirement decomposition completed
-   - [ ] RTM updated with new REQ-IDs
-   - [ ] Security review performed
-   - [ ] Performance baseline established
-   
-2. **Implementation Tasks** (in execution order):
-   - [ ] Write failing tests (TDD Red phase)
-   - [ ] Implement minimum viable change
-   - [ ] Make tests pass (TDD Green phase)
-   - [ ] Refactor for quality (TDD Refactor phase)
-   - [ ] Add observability instrumentation
-   - [ ] Update documentation
-   
-3. **Validation Tasks**:
-   - [ ] Unit tests pass (coverage ≥ 80%)
-   - [ ] Integration tests pass
-   - [ ] Linter passes with zero warnings
-   - [ ] Security scan clean (no new vulnerabilities)
-   - [ ] Performance benchmarks within SLOs
-   - [ ] Documentation reviewed for accuracy
-   
-4. **Files to Modify**: Complete list with rationale
+> **Standard Change allowance:** small changes/iterations/clarifications/refactors do **not** require a CR **as long as** the QIA indicates **no CR-required triggers**.
+> - A change can still be a **functional addition** and remain a Standard Change (no CR) if it is additive, backwards-compatible, and low-risk.
+> - Any change that hits CR-required triggers must follow the Governed Change path.
 
-#### Step 4: The "Human-in-the-Loop" Gate
+#### Step 1: Create / Update an Implementation Plan (ALWAYS REQUIRED for code changes)
 
-**CRITICAL**: Implementation **CANNOT** begin until the user provides one of the following approval tokens:
+Every change that modifies code (typically anything under `src/`, `tests/`, or dependency manifests) must have a written, saved Markdown implementation plan.
 
-- **"Approved to Proceed"**
-- **"ATP"**
-- **"Go Ahead"**
-- **"Implement"**
+- Location: `docs/processes/implementation-plans/`
+- Template: `docs/processes/templates/implementation-plan-template.md`
 
-If the user provides feedback or changes to the plan, regenerate the CR and IA and wait for re-approval.
+Rules:
+- The plan must be created/updated **before** writing implementation code.
+- The plan must include a checklist and must be updated as items complete.
+- The plan must include a short QIA summary and the CR decision.
 
-**Forbidden Actions Without Approval**:
+#### Step 2 (Governed Changes Only): Create a CR + IA + ATP Gate
+
+If QIA concludes **CR required**, you must execute the full loop:
+
+1. **Create a Change Request (CR)** in `/docs/processes/change-requests/CR-YYYY-MM-DD-XXX.md`
+2. **Perform an Impact Assessment (IA)** (blast radius)
+3. **Draft/attach an Implementation Plan** (still required; can be linked from CR)
+4. **Wait for approval token** before implementation:
+   - "Approved to Proceed" / "ATP" / "Go Ahead" / "Implement"
+
+**Forbidden Actions Without ATP (CR-required work only):**
 - Creating/modifying code files
-- Installing dependencies
+- Installing/upgrading dependencies
 - Running migrations
 - Deploying changes
 
-**Allowed Actions Without Approval**:
+**Allowed Actions Without ATP:**
 - Reading existing code
 - Analyzing architecture
 - Drafting plans and designs
 - Answering questions
+
+---
+
+### Mandatory Progress Tracking (Agents)
+
+For any work with an implementation plan:
+- Maintain a visible checklist in the plan (unchecked/checked items).
+- Add a short **Progress Log** section with timestamped notes for meaningful milestones.
+- When you finish a session, update the plan to reflect the latest status.
+
+### Mandatory Restart / Continue Behavior (Agents)
+
+On "Continue" / restart / follow-up instruction:
+1. Open the active implementation plan in `docs/processes/implementation-plans/`.
+2. Summarize current status from the checklist (what’s done / what’s next).
+3. Resume from the first unchecked item.
 
 ---
 
@@ -183,7 +159,7 @@ REQ-003: [NFR-SEC] System shall validate log file paths to prevent directory tra
 - Implementation details not in original spec
 - Non-breaking enhancements
 - Performance optimizations within tolerance
-- **Action**: Document in CR, inform user, proceed if no objection
+- **Action**: Document in the implementation plan (and CR if present), inform user, proceed if no objection
 
 **Conflict (Halt Step)**:
 - Contradicts existing ADR
@@ -218,6 +194,7 @@ Create an ADR for any decision that:
 #### MADR Template Structure
 
 Every ADR must contain:
+
 ```markdown
 # ADR-NNNN: [Title]
 
@@ -1043,4 +1020,4 @@ See individual template files in `/docs/processes/templates/`:
 
 ---
 
-**End of System Instruction Set v1.0.0**
+**End of System Instruction Set v1.1.0**

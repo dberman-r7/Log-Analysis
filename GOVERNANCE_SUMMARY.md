@@ -129,10 +129,12 @@ Observability requirements mandated for all features from day one.
 
 ### Two Paths: Standard vs Governed
 
-- **Standard changes (no CR)**: bug fixes, clarifications, and low-risk refactors/features that don't change existing REQ-IDs or materially impact existing workflows. These still require **feature branch + PR**, tests, and RTM/doc updates as needed.
-- **Governed changes (CR required)**: changes that modify/deprecate requirements, significantly change approach/architecture, have security/performance/SLO implications, or introduce breaking behavior.
+- **Standard changes (no CR)**: bug fixes, clarifications, small iterations, and low-risk refactors/features **when a Quick Impact Assessment (QIA) indicates no CR-required triggers apply**. These still require an **implementation plan (for code changes)**, feature branch + PR, tests, and RTM/doc updates as needed.
+- **Governed changes (CR required)**: changes that modify/deprecate requirements, significantly change approach/architecture, have security/performance/SLO implications, introduce breaking behavior, or otherwise meet CR triggers.
 
 > Source of truth: `docs/processes/change-management.md`.
+
+> **Implementation plan rule:** Every code change (typically `src/`, `tests/`, or dependency manifests) must have a written, saved Markdown implementation plan, and agents must track progress against it and resume from it on restart/continue.
 
 ```mermaid
 graph TD

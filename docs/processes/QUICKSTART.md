@@ -18,11 +18,13 @@ This is your TL;DR guide to working in this repository. For complete details, se
 
 ```
 1. User makes request
-2. Decide if CR is required (see docs/processes/change-management.md)
-3a. If CR-required: create CR + IA + Implementation Plan and wait for ATP
-3b. If not CR-required: follow Standard Change Path (REQ traceability + TDD)
-4. Implement on a feature branch
-5. Submit PR and meet DoD
+2. Perform a Quick Impact Assessment (QIA)
+   - Decide: Standard Change (no CR) vs Governed Change (CR required)
+3. Create/update an Implementation Plan (required for code changes)
+4a. If CR-required: create CR + IA and wait for ATP
+4b. If not CR-required: follow Standard Change Path (REQ traceability + TDD)
+5. Implement on a feature branch
+6. Submit PR and meet DoD
 ```
 
 **DO NOT START IMPLEMENTATION FOR CR-REQUIRED CHANGES WITHOUT ATP.**
@@ -42,92 +44,28 @@ cp docs/processes/templates/cr-template.md docs/processes/change-requests/CR-202
 # 2. Fill it out and wait for ATP
 ```
 
-### Updating the RTM
+### Creating an Implementation Plan (required for code changes)
 
-Every code change = RTM update. No exceptions.
+Every code change (typically `src/`, `tests/`, or dependency manifests) must have a written, saved Markdown implementation plan.
 
-```bash
-# Edit docs/requirements/rtm.md
+- Template: `docs/processes/templates/implementation-plan-template.md`
+- Location: `docs/processes/implementation-plans/`
 
-# Add new requirement:
-REQ-042: [FUNC] System shall do XYZ
-
-# Update implementation details when code is written
-# Link tests when tests are written
-```
-
-### Creating an ADR
-
-If you're making an architectural decision (new tech, new pattern, significant change):
-
-```bash
-# 1. Copy template
-cp docs/arch/adr-template.md docs/arch/adr/0001-my-decision.md
-
-# 2. Fill out:
-# - What decision you're making
-# - Options you considered
-# - Why you chose this option
-# - Consequences (good and bad)
-```
-
-### TDD Workflow
-
-```bash
-# RED: Write failing test
-pytest tests/test_feature.py  # Should fail
-
-# GREEN: Write minimum code to pass
-# ... write code ...
-pytest tests/test_feature.py  # Should pass
-
-# REFACTOR: Improve code quality
-# ... refactor ...
-pytest tests/test_feature.py  # Should still pass
-```
+Agents must keep the checklist and Progress Log updated. On restart/continue, open the plan and resume from the first unchecked item.
 
 ---
 
-## 🚫 Common Mistakes to Avoid
-
-### ❌ "I'll just quickly..."
-
-**Nope.** Even small changes still need:
-- Feature branch + PR
-- Tests (where applicable)
-- RTM/doc updates when behavior/requirements change
-
-Some changes also need:
-- Change Request (CR)
-- Approval (ATP)
-
-### ❌ "The test is wrong"
-
-**NO.** If a test fails, the code is wrong, not the test.
-
-Only change tests if:
-- The requirement changed (document it!)
-- The test itself has a bug (prove it with another test)
-
-### ❌ "I'll document it later"
-
-**NO.** Documentation is code. It gets updated with the code, not "later".
-
-If you modify src/, you MUST update docs/requirements/rtm.md in the same PR.
-
-### ❌ "Coverage slows me down"
-
-**NO.** 80% coverage is mandatory. No exceptions.
-
-If you can't test it, you can't merge it.
+## ❌ Common Mistakes to Avoid
 
 ### ❌ "It's just a config change"
 
-**NO.** Even config changes need:
-- CR documentation
-- Impact assessment
+Even small config changes still need:
+- Feature branch + PR
 - Review
-- Testing
+- Testing (as applicable)
+- An implementation plan (for code changes)
+
+A CR is only required if the change triggers governed-change criteria in `docs/processes/change-management.md`.
 
 ---
 

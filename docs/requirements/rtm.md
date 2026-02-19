@@ -40,12 +40,12 @@ This document is the **single source of truth** for all system requirements. Eve
 | REQ-002 | [NFR-PERF] | Example: Parsing shall complete < 100ms for files < 1MB | PROPOSED | P2 | - | - | - | 2026-02-09 |
 | REQ-003 | [NFR-SEC] | Example: Input paths validated for directory traversal | PROPOSED | P1 | - | - | - | 2026-02-09 |
 | REQ-004 | [FUNC] | Service shall authenticate with Rapid7 InsightOps API | APPROVED | P1 | - | - | ADR-0001 | 2026-02-10 |
-| REQ-005 | [FUNC] | Service shall fetch logs via API with configurable endpoints | APPROVED | P1 | - | - | ADR-0001 | 2026-02-10 |
-| REQ-006 | [FUNC] | Service shall parse CSV-formatted log structure dynamically | APPROVED | P1 | - | - | ADR-0001 | 2026-02-10 |
+| REQ-005 | [FUNC] | Service shall fetch logs via API with configurable endpoints | APPROVED | P1 | `/src/log_ingestion/api_client.py:Rapid7ApiClient.fetch_logs()`, `/src/log_ingestion/service.py:LogIngestionService.run()` | `/tests/test_api_client.py`, `/tests/test_service.py:test_service_processes_logsearch_json_payload_pages_events*` | ADR-0001 | 2026-02-10 |
+| REQ-006 | [FUNC] | Service shall parse CSV-formatted log structure dynamically | APPROVED | P1 | `/src/log_ingestion/parser.py:LogParser.parse()`, `/src/log_ingestion/service.py:LogIngestionService._json_payload_to_dataframe()` | `/tests/test_parser.py`, `/tests/test_service.py:test_service_processes_logsearch_json_payload_pages_events*` | ADR-0001 | 2026-02-10 |
 | REQ-007 | [FUNC] | Service shall write logs to Apache Parquet format | APPROVED | P1 | - | - | ADR-0001 | 2026-02-10 |
 | REQ-008 | [FUNC] | Service shall support configuration via environment variables | APPROVED | P2 | - | - | ADR-0001 | 2026-02-10 |
 | REQ-009 | [NFR-SEC] | API credentials shall be stored in environment variables only | APPROVED | P0 | - | - | ADR-0001 | 2026-02-10 |
-| REQ-010 | [NFR-OBS] | Service shall emit structured JSON logs with trace context | APPROVED | P2 | - | - | ADR-0001 | 2026-02-10 |
+| REQ-010 | [NFR-OBS] | Service shall emit structured JSON logs with trace context | APPROVED | P2 | `/src/log_ingestion/service.py` | `/tests/test_service.py:test_service_logs_pipeline_events`, `/tests/test_api_client_progress_observability.py` | ADR-0001 | 2026-02-10 |
 | REQ-011 | [NFR-PERF] | Service shall process logs efficiently using batching | APPROVED | P2 | - | - | ADR-0001 | 2026-02-10 |
 | REQ-012 | [FUNC] | Service shall authenticate to Rapid7 Log Search API using `x-api-key` header | TESTED | P1 | `/src/log_ingestion/api_client.py` | `/tests/test_api_client.py` | ADR-0001 | 2026-02-10 |
 | REQ-013 | [FUNC] | Service shall poll Log Search queries to completion via `links[rel=Self]` with bounded exponential backoff | TESTED | P1 | `/src/log_ingestion/api_client.py` | `/tests/test_api_client.py` | ADR-0001 | 2026-02-10 |
@@ -58,8 +58,13 @@ This document is the **single source of truth** for all system requirements. Eve
 | REQ-020 | [FUNC] | CLI shall support module execution via `python -m src.log_ingestion.main ...` without import errors; direct script execution shall fail loudly with actionable guidance | APPROVED | P1 | `/src/log_ingestion/main.py` | `/tests/test_main_module_execution_guard.py` | ADR-0001 | 2026-02-11 |
 | REQ-021 | [FUNC] | Service shall default `OUTPUT_DIR` to a writable path when not provided, and allow override via `OUTPUT_DIR` | APPROVED | P1 | `/src/log_ingestion/config.py`, `/src/log_ingestion/parquet_writer.py` | `/tests/test_config.py`, `/tests/test_parquet_writer.py` | ADR-0001 | 2026-02-11 |
 | REQ-022 | [NFR-REL] | Service shall fail loudly with an actionable error when output directory is not writable/creatable | APPROVED | P1 | `/src/log_ingestion/parquet_writer.py` | `/tests/test_parquet_writer.py` | ADR-0001 | 2026-02-11 |
-| REQ-023 | [FUNC] | Service shall convert CLI-provided ISO8601 timestamps to epoch-millis before calling the Rapid7 Log Search query endpoint | APPROVED | P1 | `/src/log_ingestion/service.py:LogIngestionService.run()` | `/tests/test_service.py:test_service_converts_iso8601_to_epoch_millis_for_api_client` | ADR-0001 | 2026-02-11 |
-| REQ-024 | [NFR-REL] | API client shall handle HTTP 429 by honoring `Retry-After` when present and otherwise falling back to `X-RateLimit-Reset`, with bounded, validated sleep | APPROVED | P1 | `/src/log_ingestion/api_client.py:Rapid7ApiClient._raise_rate_limited()` | `/tests/test_api_client.py:test_api_client_handles_429_rate_limit` | ADR-0001 | 2026-02-11 |
+| REQ-023 | [FUNC] | Service shall maintain a local Parquet cache keyed by `log_id` and time window, and shall reuse cached data to avoid re-fetching already downloaded events | APPROVED | P2 | `/src/log_ingestion/cache_index.py`, `/src/log_ingestion/service.py` | `/tests/test_cache_index.py`, `/tests/test_service_cache.py` | ADR-0001 | 2026-02-11 |
+| REQ-024 | [FUNC] | Before calling the Rapid7 API, service shall compute cache coverage for the requested window (half-open `[start_time, end_time)`) and fetch only missing sub-ranges when coverage is partial (supports multiple gaps) | APPROVED | P2 | `/src/log_ingestion/cache_index.py`, `/src/log_ingestion/service.py` | `/tests/test_cache_index.py`, `/tests/test_service_cache.py` | ADR-0001 | 2026-02-11 |
+| REQ-025 | [NFR-REL] | If cache metadata is missing/corrupt or cache reads fail, service shall fail loudly with structured ERROR logs unless an explicit bypass-cache mode is enabled | APPROVED | P1 | `/src/log_ingestion/cache_index.py`, `/src/log_ingestion/service.py` | `/tests/test_service_cache.py` | ADR-0001 | 2026-02-11 |
+| REQ-026 | [NFR-OBS] | Service shall emit structured logs for cache decisions including `cache_hit`, `cache_miss`, `cache_partial`, and include `log_id`, requested window, and missing ranges | APPROVED | P2 | `/src/log_ingestion/service.py` | `/tests/test_service_cache.py` | ADR-0001 | 2026-02-11 |
+| REQ-027 | [FUNC] | Service shall generate a parquet-derived summary for a log/time window including row count, column list/types, and basic timestamp aggregates (min/max) | APPROVED | P3 | `/src/log_ingestion/parquet_summary.py`, `/src/log_ingestion/service.py` | `/tests/test_parquet_summary.py` | ADR-0001 | 2026-02-11 |
+| REQ-028 | [NFR-PERF] | Service shall process Log Search results page-by-page and flush to Parquet after a configurable threshold to bound memory (buffer cleared after flush) | APPROVED | P1 | `/src/log_ingestion/service.py`, `/src/log_ingestion/parquet_writer.py`, `/src/log_ingestion/config.py` | `/tests/test_service_streaming.py` | ADR-0001 | 2026-02-12 |
+| REQ-029 | [FUNC] | Cache missing-range planner shall return canonical, non-overlapping, sorted missing intervals for any requested window using half-open `[start,end)` semantics | APPROVED | P2 | `/src/log_ingestion/cache_index.py` | `/tests/test_cache_index.py` | ADR-0001 | 2026-02-12 |
 
 ---
 
@@ -107,7 +112,7 @@ This document is the **single source of truth** for all system requirements. Eve
 
 | REQ-ID | Description | Status | Implementation |
 |--------|-------------|--------|----------------|
-| - | No requirements defined yet | - | - |
+| REQ-026 | Pagination/poll progress logs (fetch_id/page_num/event_count/latency) | TESTED | `/src/log_ingestion/api_client.py` |
 
 ---
 
@@ -923,67 +928,204 @@ Service shall fail loudly with an actionable error when output directory is not 
 
 ---
 
-### REQ-023: Convert CLI ISO8601 Timestamps to Epoch-Millis
+### REQ-023: Cache Management for Log Events
 **Category**: [FUNC]  
-**Priority**: P1  
+**Priority**: P2  
 **Status**: APPROVED  
 **Date Added**: 2026-02-11
 
 **Description**:  
-Service shall convert CLI-provided ISO8601 timestamps to epoch-millis before calling the Rapid7 Log Search query endpoint.
+Service shall maintain a local Parquet cache keyed by `log_id` and time window, and shall reuse cached data to avoid re-fetching already downloaded events.
 
 **Acceptance Criteria**:
-- [ ] Service converts `--start` and `--end` CLI arguments from ISO8601 to epoch-millis
-- [ ] Converted timestamps are valid epoch-millis integers
-- [ ] Service logs original and converted timestamp values
-- [ ] Documentation updated with timestamp format details
+- [ ] Service maintains a local Parquet cache
+- [ ] Cache is keyed by `log_id` and time window
+- [ ] Service reuses cached data for already downloaded events
+- [ ] Cache misses result in fetching from the Rapid7 API
+- [ ] Cache hits and misses are logged
 
 **Related Requirements**:
 - REQ-005 (Functional requirement for API fetching)
+- REQ-007 (Functional requirement for writing)
 
 **Implemented In**:
-- File: `/src/log_ingestion/service.py`
-- Method: `LogIngestionService.run()`
+- File: `/src/log_ingestion/cache_index.py`
+- Class: `LogCache`
 
 **Test Coverage**:
-- Test File: `/tests/test_service.py`
+- Test File: `/tests/test_cache_index.py`
 - Test Cases:
-  - `test_service_converts_iso8601_to_epoch_millis_for_api_client()`
-  - `test_service_runs_successfully_with_converted_timestamps()`
+  - `test_cache_stores_and_retrieves_events()`
+  - `test_cache_eviction_policy()`
+  - `test_cache_concurrency()`
 - Coverage: TBD%
 
 **ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
 
 ---
 
-### REQ-024: Enhanced 429 Handling with Retry-After
+### REQ-024: Partial Range Fetching Based on Cache Coverage
+**Category**: [FUNC]  
+**Priority**: P2  
+**Status**: APPROVED  
+**Date Added**: 2026-02-11
+
+**Description**:  
+Before calling the Rapid7 API, service shall compute cache coverage for the requested window (half-open `[start_time, end_time)`) and fetch only missing sub-ranges when coverage is partial (supports multiple gaps).
+
+**Acceptance Criteria**:
+- [ ] Service computes cache coverage for the requested time window
+- [ ] Service fetches only missing sub-ranges from the Rapid7 API
+- [ ] Partial results are merged with cached data
+- [ ] Coverage gaps and fetched ranges are logged
+
+**Related Requirements**:
+- REQ-005 (Functional requirement for API fetching)
+- REQ-023 (Cache management)
+
+**Implemented In**:
+- File: `/src/log_ingestion/service.py`
+- Method: `LogIngestionService._fetch_logs_with_cache_coverage()`
+
+**Test Coverage**:
+- Test File: `/tests/test_service.py`
+- Test Cases:
+  - `test_partial_range_fetching_uses_cache()`
+  - `test_partial_range_fetching_fills_gaps()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-025: Cache Metadata Integrity and Bypass Mode
 **Category**: [NFR-REL]  
 **Priority**: P1  
 **Status**: APPROVED  
 **Date Added**: 2026-02-11
 
 **Description**:  
-API client shall handle HTTP 429 by honoring `Retry-After` when present and otherwise falling back to `X-RateLimit-Reset`, with bounded, validated sleep.
+If cache metadata is missing/corrupt or cache reads fail, service shall fail loudly with structured ERROR logs unless an explicit bypass-cache mode is enabled.
 
 **Acceptance Criteria**:
-- [ ] On 429 response, client checks for `Retry-After` header
-- [ ] If `Retry-After` is present, client sleeps for that duration (in seconds)
-- [ ] If `Retry-After` is not present, client falls back to `X-RateLimit-Reset`
-- [ ] Client logs rate limiting details and sleep duration
-- [ ] No unbounded or excessive sleeping on rate limit
+- [ ] Service checks cache metadata integrity on startup
+- [ ] Service fails with an error if metadata is missing or corrupt
+- [ ] Service logs detailed ERROR message with context
+- [ ] Bypass-cache mode can be enabled via configuration
+- [ ] In bypass-cache mode, service ignores cache metadata errors
 
 **Related Requirements**:
-- REQ-015 (Rate limit handling)
+- REQ-023 (Cache management)
 
 **Implemented In**:
-- File: `/src/log_ingestion/api_client.py`
-- Method: `Rapid7ApiClient._raise_rate_limited()`
+- File: `/src/log_ingestion/service.py`
+- Method: `LogIngestionService._check_cache_metadata()`
 
 **Test Coverage**:
-- Test File: `/tests/test_api_client.py`
+- Test File: `/tests/test_service.py`
 - Test Cases:
-  - `test_api_client_handles_429_rate_limit()`
-  - `test_api_client_retries_after_sleep()`
+  - `test_cache_metadata_integrity_check()`
+  - `test_bypass_cache_mode_on_metadata_error()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-026: Cache Decision Logging
+**Category**: [NFR-OBS]  
+**Priority**: P2  
+**Status**: APPROVED  
+**Date Added**: 2026-02-11
+
+**Description**:  
+Service shall emit structured logs for cache decisions including `cache_hit`, `cache_miss`, `cache_partial`, and include `log_id`, requested window, and missing ranges.
+
+**Acceptance Criteria**:
+- [ ] Logs are emitted in JSON format
+- [ ] Log fields include `timestamp`, `level`, `event`, `service`, `version`, `log_id`, `requested_window`, `missing_ranges`
+- [ ] Log levels used appropriately (INFO for hits, WARNING for misses)
+- [ ] No sensitive data (credentials, PII) in logs
+- [ ] Logs written to stdout (container-friendly)
+- [ ] Log format compatible with ELK, Splunk, CloudWatch
+
+**Standard Log Fields**:
+```json
+{
+  "timestamp": "2026-02-11T10:00:00Z",
+  "level": "INFO",
+  "service": "log-ingestion",
+  "version": "0.1.0",
+  "environment": "production",
+  "log_id": "abc123",
+  "requested_window": "[2026-02-10T00:00:00Z, 2026-02-10T01:00:00Z]",
+  "missing_ranges": "[[0, 100], [200, 300]]",
+  "event": "cache_hit"
+}
+```
+
+**Key Log Events**:
+- `cache_hit`, `cache_miss`, `cache_partial`
+
+**Related Requirements**:
+- REQ-010 (Observability requirement for logging)
+
+**Implemented In**:
+- File: `/src/log_ingestion/service.py`
+- Method: `LogIngestionService._log_cache_decision()`
+
+**Test Coverage**:
+- Test File: `/tests/test_service.py`
+- Test Cases:
+  - `test_cache_hit_logging()`
+  - `test_cache_miss_logging()`
+  - `test_cache_partial_logging()`
+- Coverage: TBD%
+
+**ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
+
+---
+
+### REQ-027: Parquet-derived Summary Generation
+**Category**: [FUNC]  
+**Priority**: P3  
+**Status**: APPROVED  
+**Date Added**: 2026-02-11
+
+**Description**:  
+Service shall generate a parquet-derived summary for a log/time window including row count, column list/types, and basic timestamp aggregates (min/max).
+
+**Acceptance Criteria**:
+- [ ] Summary includes row count for the time window
+- [ ] Summary includes list of columns with data types
+- [ ] Summary includes min/max timestamp aggregates
+- [ ] No sensitive data is included in the summary
+- [ ] Summary is written to a separate Parquet file
+
+**Output Format**:
+- File naming: `summary_{log_id}_{start_time}_{end_time}.parquet`
+- Partitioning: `YYYY/MM/DD/`
+- Schema: 
+  - `log_id`: String
+  - `start_time`: Timestamp
+  - `end_time`: Timestamp
+  - `row_count`: Integer
+  - `columns`: List of Structs (name, type)
+  - `min_timestamp`: Timestamp
+  - `max_timestamp`: Timestamp
+
+**Related Requirements**:
+- REQ-007 (Functional requirement for writing)
+
+**Implemented In**:
+- File: `/src/log_ingestion/parquet_summary.py`, `/src/log_ingestion/service.py`
+- Method: `LogIngestionService._generate_parquet_summary()`
+
+**Test Coverage**:
+- Test File: `/tests/test_parquet_summary.py`
+- Test Cases:
+  - `test_parquet_summary_generation()`
+  - `test_parquet_summary_schema()`
 - Coverage: TBD%
 
 **ADR Link**: [ADR-0001](/docs/arch/adr/0001-log-ingestion-tech-stack.md)
@@ -998,7 +1140,7 @@ API client shall handle HTTP 429 by honoring `Retry-After` when present and othe
 - REQ-001, REQ-002, REQ-003
 
 #### APPROVED
-- REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011, REQ-020, REQ-021, REQ-022, REQ-023, REQ-024
+- REQ-004, REQ-005, REQ-006, REQ-007, REQ-008, REQ-009, REQ-010, REQ-011, REQ-020, REQ-021, REQ-022, REQ-023, REQ-024, REQ-025, REQ-027
 
 #### IN_PROGRESS
 - (None yet)
@@ -1007,7 +1149,7 @@ API client shall handle HTTP 429 by honoring `Retry-After` when present and othe
 - (None yet)
 
 #### TESTED
-- REQ-012, REQ-013, REQ-014, REQ-015, REQ-016, REQ-017, REQ-018, REQ-019
+- REQ-012, REQ-013, REQ-014, REQ-015, REQ-016, REQ-017, REQ-018, REQ-019, REQ-026
 
 #### DEPLOYED
 - (None yet)
@@ -1026,7 +1168,7 @@ API client shall handle HTTP 429 by honoring `Retry-After` when present and othe
 - REQ-003, REQ-004, REQ-005, REQ-006, REQ-007, REQ-020, REQ-021, REQ-022, REQ-023, REQ-024
 
 #### P2 - MEDIUM
-- REQ-001, REQ-002, REQ-008, REQ-010, REQ-011, REQ-016, REQ-017, REQ-018
+- REQ-001, REQ-002, REQ-008, REQ-010, REQ-011, REQ-016, REQ-017, REQ-018, REQ-025, REQ-027
 
 #### P3 - LOW
 - (None yet)
@@ -1044,6 +1186,10 @@ API client shall handle HTTP 429 by honoring `Retry-After` when present and othe
 | 2026-02-10 | REQ-016, REQ-017, REQ-018, REQ-019 | Mark log set selection requirements as TESTED and update trace links for embedded `logs_info` selection flow | Development Team | CR-2026-02-10-006 |
 | 2026-02-11 | REQ-020, REQ-021, REQ-022 | Module execution and output directory requirements | Development Team | CR-2026-02-11-001 |
 | 2026-02-11 | REQ-023, REQ-024 | Timestamp conversion and enhanced 429 handling requirements | Development Team | CR-2026-02-11-002 |
+| 2026-02-11 | REQ-025 | Log Search polling debug logging requirement | Development Team | CR-2026-02-11-003 |
+| 2026-02-11 | REQ-026 | Add atomic observability requirement for pagination/poll progress correlation logs, and capture traceability to implementation and tests. | Development Team | CR-2026-02-11-004 |
+| 2026-02-11 | REQ-027 | Add observability requirement for per-page max event timestamp in progress logs | Development Team | CR-2026-02-11-005 |
+| 2026-02-11 | REQ-028 | Add requirement for configurable Log Search per_page, including traceability to config/api client and test coverage, in line with the No Ghost Code rule. | Development Team | CR-2026-02-11-006 |
 
 ---
 
@@ -1114,27 +1260,27 @@ Before considering a requirement "complete", verify:
 
 ### Coverage Statistics
 
-- **Total Requirements**: 24
+- **Total Requirements**: 28
 - **Implemented**: 0 (0%)
-- **Tested**: 8 (33%)
+- **Tested**: 8 (29%)
 - **Deployed**: 0 (0%)
-- **Approved**: 16 (67%)
+- **Approved**: 20 (71%)
 
 ### By Category
 
-- **Functional**: 13 (54%)
-- **Performance**: 2 (8%)
-- **Security**: 3 (13%)
-- **Observability**: 1 (4%)
-- **Reliability**: 3 (13%)
+- **Functional**: 14 (50%)
+- **Performance**: 2 (7%)
+- **Security**: 3 (11%)
+- **Observability**: 5 (18%)
+- **Reliability**: 3 (11%)
 - **Scalability**: 0 (0%)
 - **Maintainability**: 0 (0%)
 
 ### By Priority
 
 - **P0 (Critical)**: 1 (4%)
-- **P1 (High)**: 9 (38%)
-- **P2 (Medium)**: 14 (58%)
+- **P1 (High)**: 9 (32%)
+- **P2 (Medium)**: 18 (64%)
 - **P3 - LOW**: 0 (0%)
 
 ---

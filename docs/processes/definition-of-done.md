@@ -29,7 +29,7 @@ Use this checklist for **every** pull request:
 - [ ] **Requirements Documented**: All requirements are documented in RTM with REQ-IDs
 - [ ] **CR Created (if required)**: CR is created and approved **only when the change meets CR-required triggers** (see `docs/processes/change-management.md`)
 - [ ] **Impact Assessment (if CR-required)**: Blast radius analysis completed for governed changes
-- [ ] **Implementation Plan (if CR-required)**: Step-by-step plan documented and followed for governed changes
+- [ ] **Implementation Plan (required for code changes)**: A written, saved Markdown implementation plan exists for any code change (typically `src/`, `tests/`, or dependency manifests) and is updated as work progresses
 - [ ] **ATP Received (if CR-required)**: "Approved to Proceed" token received from user before implementation for governed changes
 
 ---

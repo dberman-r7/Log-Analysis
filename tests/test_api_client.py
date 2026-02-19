@@ -5,21 +5,25 @@ Following TDD approach - these tests are written first (RED phase)
 and will fail until the API client module is implemented.
 """
 
-import time
 from unittest.mock import Mock, patch
 
 import pytest
 import requests
 
 
-def test_api_client_constructs_auth_header():
-    """Test that API client creates provider Log Search authentication header"""
+# Helper: construct settings using env var aliases (Pydantic BaseSettings).
+def _config(**env: str):
     from src.log_ingestion.config import LogIngestionConfig
 
-    config = LogIngestionConfig(
-        rapid7_api_key="test_api_key_123",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
+    return LogIngestionConfig(**env)
+
+
+def test_api_client_constructs_auth_header():
+    """Test that API client creates provider Log Search authentication header"""
+    config = _config(
+        RAPID7_API_KEY="test_api_key_123",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
     )
 
     from src.log_ingestion.api_client import Rapid7ApiClient
@@ -33,14 +37,12 @@ def test_api_client_constructs_auth_header():
 
 def test_api_client_fetches_logs_successfully():
     """Test successful Log Search query fetch"""
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
-        rapid7_query="",
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
+        RAPID7_QUERY="",
     )
 
     # First response returns completed result set (no Self link)
@@ -62,13 +64,12 @@ def test_api_client_fetches_logs_successfully():
 
 def test_api_client_polls_self_until_complete():
     """If API returns rel=Self, client should poll until completion"""
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
+        POLL_PROGRESS_LOG_EVERY="1",
     )
 
     in_progress = Mock()
@@ -95,15 +96,42 @@ def test_api_client_polls_self_until_complete():
     assert "events" in result
 
 
+def test_api_client_poll_timeout_fails_loudly():
+    """NFR-REL: Polling should not hang forever if server keeps returning rel=Self."""
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
+        POLL_MAX_ITERATIONS="2",
+        POLL_MAX_WALL_SECONDS="60",
+        POLL_PROGRESS_LOG_EVERY="1",
+    )
+
+    in_progress = Mock()
+    in_progress.status_code = 200
+    in_progress.headers = {"Content-Type": "application/json"}
+    in_progress.json.return_value = {
+        "links": [{"rel": "Self", "href": "https://cont/self"}]
+    }
+
+    from src.log_ingestion.api_client import Rapid7ApiClient
+
+    # Never completes: initial query + two polls still in progress => timeout
+    with patch("requests.Session.get") as mock_get, patch("time.sleep"):
+        mock_get.side_effect = [in_progress, in_progress, in_progress]
+        client = Rapid7ApiClient(config)
+        with pytest.raises(TimeoutError):
+            client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
+
+
 def test_api_client_follows_next_page_links():
     """If response contains rel=Next, client should fetch next pages"""
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
     )
 
     page1 = Mock()
@@ -131,15 +159,59 @@ def test_api_client_follows_next_page_links():
     assert "p2" in result
 
 
+def test_api_client_repeating_next_url_fails_loudly():
+    """NFR-REL: client must not loop forever if pagination doesn't advance."""
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
+    )
+
+    page1 = Mock()
+    page1.status_code = 200
+    page1.headers = {"Content-Type": "application/json"}
+    page1.json.return_value = {
+        "events": [{"message": "p1"}],
+        "links": [{"rel": "Next", "href": "https://cont/next"}],
+    }
+
+    page2 = Mock()
+    page2.status_code = 200
+    page2.headers = {"Content-Type": "application/json"}
+    # API repeats the exact same Next link.
+    page2.json.return_value = {
+        "events": [{"message": "p2"}],
+        "links": [{"rel": "Next", "href": "https://cont/next"}],
+    }
+
+    page3 = Mock()
+    page3.status_code = 200
+    page3.headers = {"Content-Type": "application/json"}
+    page3.json.return_value = {
+        "events": [{"message": "p3"}],
+        "links": [{"rel": "Next", "href": "https://cont/next"}],
+    }
+
+    from src.log_ingestion.api_client import Rapid7ApiClient
+
+    with patch("requests.Session.get") as mock_get:
+        mock_get.side_effect = [page1, page2, page3]
+        client = Rapid7ApiClient(config)
+        with pytest.raises(RuntimeError):
+            client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
+
+    # We should have attempted at least the first two pages before detecting the loop.
+    assert mock_get.call_count >= 2
+
+
 def test_api_client_handles_401_unauthorized():
     """Test handling of authentication failure"""
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="invalid_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
+    config = _config(
+        RAPID7_API_KEY="invalid_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
     )
 
     mock_response = Mock()
@@ -159,13 +231,11 @@ def test_api_client_handles_401_unauthorized():
 
 def test_api_client_handles_429_rate_limit():
     """Handle 429 using Retry-After/X-RateLimit-Reset and retry"""
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
     )
 
     rate_limited = Mock()
@@ -192,13 +262,11 @@ def test_api_client_handles_429_rate_limit():
 
 def test_api_client_timeout_handling():
     """Test timeout configuration and handling"""
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
     )
 
     from src.log_ingestion.api_client import Rapid7ApiClient
@@ -213,14 +281,12 @@ def test_api_client_timeout_handling():
 
 def test_api_client_handles_connection_error():
     """Test handling of network connection errors"""
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
-        retry_attempts=2,
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
+        RETRY_ATTEMPTS="2",
     )
 
     from src.log_ingestion.api_client import Rapid7ApiClient
@@ -239,13 +305,11 @@ def test_api_client_list_log_sets_success():
     """REQ-016: list available log sets via management API."""
     from unittest.mock import Mock, patch
 
-    from src.log_ingestion.config import LogIngestionConfig
-
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
     )
 
     resp = Mock()
@@ -274,13 +338,12 @@ def test_api_client_list_logs_in_log_set_success():
     from unittest.mock import patch
 
     from src.log_ingestion.api_client import Rapid7ApiClient
-    from src.log_ingestion.config import LogIngestionConfig
 
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_1",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
     )
 
     client = Rapid7ApiClient(config)
@@ -300,14 +363,13 @@ def test_api_client_query_404_logs_actionable_guidance(capsys):
     import requests
 
     from src.log_ingestion.api_client import Rapid7ApiClient
-    from src.log_ingestion.config import LogIngestionConfig
 
-    config = LogIngestionConfig(
-        rapid7_api_key="test_key",
-        rapid7_log_key="logkey_404",
-        output_dir="/tmp/test",
-        rapid7_data_storage_region="eu",
-        rapid7_query="",
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_404",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
+        RAPID7_QUERY="",
     )
 
     resp = Mock()
@@ -331,6 +393,8 @@ def test_api_client_query_404_logs_actionable_guidance(capsys):
         region="eu",
         log_key="logkey_404",
         guidance=ANY,
+        status_code=404,
+        body_preview=ANY,
     )
 
     guidance_values = [
@@ -342,3 +406,101 @@ def test_api_client_query_404_logs_actionable_guidance(capsys):
     assert isinstance(guidance_values[-1], str)
     assert "region" in guidance_values[-1].lower()
     assert "log" in guidance_values[-1].lower()
+
+
+def test_api_client_poll_debug_fields_logged(monkeypatch, capsys):
+    """REQ-025: Polling debug logs should include poll_count, elapsed_seconds, and response details."""
+
+    # Capture structlog events without depending on logging handlers.
+    import structlog
+
+    events: list[dict] = []
+
+    def _capture(_logger, method_name, event_dict):
+        events.append(event_dict)
+        return event_dict
+
+    structlog.configure(
+        processors=[_capture],
+        logger_factory=structlog.ReturnLoggerFactory(),
+        cache_logger_on_first_use=False,
+    )
+
+    config = _config(
+        RAPID7_API_KEY="test_key",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_DATA_STORAGE_REGION="eu",
+        POLL_PROGRESS_LOG_EVERY="1",
+    )
+
+    in_progress = Mock()
+    in_progress.status_code = 200
+    in_progress.headers = {"Content-Type": "application/json"}
+    in_progress.text = "{\"links\":[{\"rel\":\"Self\",\"href\":\"https://cont/self\"}]}"
+    in_progress.json.return_value = {
+        "links": [{"rel": "Self", "href": "https://cont/self"}]
+    }
+
+    completed = Mock()
+    completed.status_code = 200
+    completed.headers = {"Content-Type": "application/json"}
+    completed.text = "{\"events\":[{\"message\":\"done\"}]}"
+    completed.json.return_value = {"events": [{"message": "done"}]}
+
+    with patch("requests.Session.get") as mock_get, patch("time.sleep"):
+        mock_get.side_effect = [in_progress, completed]
+        from src.log_ingestion.api_client import Rapid7ApiClient
+
+        client = Rapid7ApiClient(config)
+        _ = client.fetch_logs("2026-02-10T10:00:00Z", "2026-02-10T10:01:00Z")
+
+    received = [e for e in events if e.get("event") == "logsearch_poll_response_received"]
+    assert received, "Expected logsearch_poll_response_received debug event"
+
+    last = received[-1]
+    assert isinstance(last.get("poll_count"), int)
+    assert last["poll_count"] >= 1
+    assert isinstance(last.get("elapsed_seconds"), (int, float))
+    assert last.get("status_code") in (200, 429)
+    assert "response_headers" in last
+
+    # body_preview may be present on logsearch_poll_response_received (INFO) or on the
+    # dedicated debug event. Either way, we require that a truncated preview exists
+    # for triage (REQ-025), without forcing it into the higher-volume INFO event.
+    if "body_preview" not in last:
+        previews = [e for e in events if e.get("event") == "logsearch_poll_response_body_preview"]
+        assert previews, "Expected logsearch_poll_response_body_preview debug event"
+        assert isinstance(previews[-1].get("body_preview"), str)
+        assert previews[-1]["body_preview"]
+
+
+def test_api_client_uses_configured_per_page_header():
+    """REQ-028: API client should send configured per_page in the initial query request params."""
+    config = _config(
+        RAPID7_API_KEY="test_api_key_123",
+        RAPID7_LOG_KEY="logkey_1",
+        OUTPUT_DIR="/tmp/test",
+        RAPID7_PER_PAGE="250",
+    )
+
+    from src.log_ingestion.api_client import Rapid7ApiClient
+
+    client = Rapid7ApiClient(config)
+
+    # Mock the initial query call so we can assert on params.
+    seed = Mock()
+    seed.status_code = 200
+    seed.headers = {"Content-Type": "application/json"}
+    seed.text = "{\"events\":[]}"  # terminal response
+    seed.json.return_value = {"events": []}
+
+    with patch.object(client, "_request_get", return_value=seed) as mock_get:
+        _ = client.fetch_logs("1", "2")
+
+    assert mock_get.call_count >= 1
+    _url = mock_get.call_args.kwargs.get("url") if hasattr(mock_get.call_args, "kwargs") else None
+    # Use the kwargs for params regardless of how patch captures signature.
+    called_params = mock_get.call_args.kwargs.get("params")
+    assert isinstance(called_params, dict)
+    assert called_params.get("per_page") == "250"

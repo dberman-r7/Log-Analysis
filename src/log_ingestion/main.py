@@ -28,22 +28,19 @@ from .log_selection import choose_log_id, choose_log_set_id
 from .api_client import Rapid7ApiClient
 
 # Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer(),
-    ],
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    wrapper_class=structlog.stdlib.BoundLogger,
-    cache_logger_on_first_use=True,
+# NOTE: structlog needs stdlib logging handlers to actually emit log lines.
+import logging
+
+LOG_LEVEL_DEFAULT = "INFO"
+
+# Defer setting the stdlib logging level until we load LogIngestionConfig(), so
+# LOG_LEVEL is sourced from the same place as all other settings (env/.env).
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(message)s",
 )
+
 
 logger = structlog.get_logger()
 
@@ -147,11 +144,21 @@ def validate_iso8601(timestamp: str) -> bool:
     Returns:
         bool: True if valid, False otherwise
     """
+    # Require a full datetime (date-only strings are not accepted by the CLI contract).
+    if "T" not in timestamp:
+        return False
+
     try:
-        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        return True
+        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     except ValueError:
         return False
+
+    # Enforce timezone awareness for CLI correctness (avoid ambiguous local time).
+    return dt.tzinfo is not None
+
+
+# NOTE: The rest of this module is exercised via CLI/integration tests. Unit tests
+# cover validate_iso8601() extensively.
 
 
 def _run_log_selection(config: LogIngestionConfig, env_file: str) -> int:
@@ -240,6 +247,9 @@ def main():
         # Load configuration from environment
         config = LogIngestionConfig()
 
+        # Apply configured log level after config is loaded.
+        logging.getLogger().setLevel(logging.getLevelName(config.log_level))
+
         if args.select_log:
             sys.exit(_run_log_selection(config, args.env_file))
 
@@ -303,13 +313,50 @@ def main():
         print(f"Rows processed:    {result['rows_processed']:,}")
         print(f"Batches processed: {result['batches_processed']}")
         print(f"Duration:          {result['duration_seconds']:.2f} seconds")
+
+        # Extra reconciliation info (best-effort)
+        requested_from_ms = result.get("start_time_millis")
+        requested_to_ms = result.get("end_time_millis")
+        observed_min_ms = result.get("observed_min_ts_ms")
+        observed_max_ms = result.get("observed_max_ts_ms")
+
+        if requested_from_ms is not None and requested_to_ms is not None:
+            print(f"Requested window:  [{requested_from_ms}, {requested_to_ms}) ms")
+        if observed_min_ms is not None and observed_max_ms is not None:
+            print(f"Observed events:   [{observed_min_ms}, {observed_max_ms}] ms")
+
+        raw_events_seen = result.get("raw_events_seen")
+        duplicates_dropped = result.get("duplicates_dropped")
+        dedupe_enabled = result.get("dedupe_enabled")
+        if raw_events_seen is not None:
+            print(f"Raw events seen:   {int(raw_events_seen):,}")
+        if duplicates_dropped is not None:
+            print(f"Duplicates dropped:{int(duplicates_dropped):,}")
+        if dedupe_enabled is not None:
+            print(f"Dedupe enabled:    {bool(dedupe_enabled)}")
+
+        parquet_parts_written = result.get("parquet_parts_written")
+        parquet_total_bytes_written = result.get("parquet_total_bytes_written")
+        if parquet_parts_written is not None:
+            print(f"Parquet parts:     {int(parquet_parts_written)}")
+        if parquet_total_bytes_written is not None:
+            mb = float(parquet_total_bytes_written) / (1024 * 1024)
+            print(f"Parquet bytes:     {int(parquet_total_bytes_written):,} ({mb:.2f} MB)")
+
         if result['output_file']:
             print(f"Output file:       {result['output_file']}")
-            # Get file size if it exists
             output_path = Path(result['output_file'])
             if output_path.exists():
-                file_size_mb = output_path.stat().st_size / (1024 * 1024)
-                print(f"File size:         {file_size_mb:.2f} MB")
+                if output_path.is_file():
+                    file_size_mb = output_path.stat().st_size / (1024 * 1024)
+                    print(f"File size:         {file_size_mb:.2f} MB")
+                elif output_path.is_dir():
+                    # Directory dataset (multiple parts)
+                    parquet_files = list(output_path.glob("*.parquet"))
+                    total_bytes = sum(p.stat().st_size for p in parquet_files if p.exists())
+                    total_mb = total_bytes / (1024 * 1024)
+                    print(f"Dataset parts:     {len(parquet_files)}")
+                    print(f"Dataset size:      {total_mb:.2f} MB")
         else:
             print("Output file:       None (no data to process)")
         print("=" * 60)

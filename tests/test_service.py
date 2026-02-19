@@ -5,6 +5,7 @@ Following TDD approach - these tests are written first (RED phase)
 and will fail until the main service module is implemented.
 """
 
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -54,6 +55,127 @@ def test_service_orchestrates_complete_pipeline():
         assert "timestamp" in df.columns
         assert "level" in df.columns
         assert "message" in df.columns
+
+
+def test_service_processes_logsearch_json_payload_pages_events():
+    """Service should accept the API client's aggregated JSON payload and process events."""
+    from src.log_ingestion.config import LogIngestionConfig
+    from src.log_ingestion.service import LogIngestionService
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = LogIngestionConfig(
+            rapid7_api_key="test_key",
+            rapid7_log_key="test-log-key",
+            output_dir=tmpdir,
+        )
+
+        payload = {
+            "fetch_id": "fetch-123",
+            "pages": [
+                {
+                    "events": [
+                        {
+                            "message": "hello",
+                            "timestamp": 1770681601982,
+                            "sequence_number": 1,
+                        },
+                        {
+                            "message": "world",
+                            "timestamp": 1770681601999,
+                            "sequence_number": 2,
+                        },
+                    ]
+                }
+            ],
+        }
+
+        with patch("src.log_ingestion.service.Rapid7ApiClient.fetch_logs") as mock_fetch:
+            mock_fetch.return_value = json.dumps(payload)
+
+            service = LogIngestionService(config)
+            result = service.run(
+                start_time="2026-02-10T00:00:00Z",
+                end_time="2026-02-10T00:00:02Z",
+            )
+
+        assert result["rows_processed"] == 2
+        assert result["output_file"] is not None
+        df = pd.read_parquet(result["output_file"])
+        assert len(df) == 2
+        assert "message" in df.columns
+        assert df["message"].tolist() == ["hello", "world"]
+
+
+def test_service_processes_logsearch_json_payload_pages_events_json_string(tmp_path):
+    """Service should decode pages where events is a JSON string of list[str(json-object)].
+
+    This covers provider payload shapes where `events` is returned as a JSON string.
+    """
+    from src.log_ingestion.config import LogIngestionConfig
+    from src.log_ingestion.service import LogIngestionService
+
+    config = LogIngestionConfig(
+        rapid7_api_key="test_key",
+        rapid7_log_key="test-log-json-events-string",
+        output_dir=str(tmp_path / "output"),
+        cache_dir=str(tmp_path / "cache"),
+    )
+
+    page_events = json.dumps(
+        [
+            json.dumps({"message": "m1", "timestamp": 1, "sequence_number": 1, "log_id": "test-log-json-events-string"}),
+            json.dumps({"message": "m2", "timestamp": 2, "sequence_number": 2, "log_id": "test-log-json-events-string"}),
+        ]
+    )
+
+    payload = {"fetch_id": "fetch-json-events-string", "pages": [{"events": page_events}]}
+
+    with patch("src.log_ingestion.service.Rapid7ApiClient.fetch_logs") as mock_fetch:
+        mock_fetch.return_value = json.dumps(payload)
+        service = LogIngestionService(config)
+        result = service.run(start_time="1970-01-01T00:00:00Z", end_time="1970-01-01T00:00:10Z")
+
+    assert result["rows_processed"] == 2
+    assert result["cache_partial"] is False
+    assert result["cache_hit"] is False
+
+
+def test_service_logs_empty_json_extraction_with_meta(caplog):
+    """If JSON payload is detected but yields no events, log should include fetch_id/pages/events_total."""
+    from src.log_ingestion.config import LogIngestionConfig
+    from src.log_ingestion.service import LogIngestionService
+
+    caplog.set_level("WARNING")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        config = LogIngestionConfig(
+            rapid7_api_key="test_key",
+            rapid7_log_key="test-log-key",
+            output_dir=tmpdir,
+            bypass_cache=True,
+        )
+
+        payload = {"fetch_id": "fetch-empty", "pages": [{"not_events": []}]}
+
+        with patch("src.log_ingestion.service.Rapid7ApiClient.fetch_logs") as mock_fetch:
+            mock_fetch.return_value = json.dumps(payload)
+
+            service = LogIngestionService(config)
+            result = service.run(
+                start_time="2026-02-10T00:00:00Z",
+                end_time="2026-02-10T00:00:02Z",
+            )
+
+    assert result["rows_processed"] == 0
+
+    # We don't assert the exact formatting, but the structured log should carry these fields.
+    empty_events = [
+        r
+        for r in caplog.records
+        if ("pipeline_empty_data" in str(getattr(r, "msg", "")))
+        or (hasattr(r, "getMessage") and "pipeline_empty_data" in r.getMessage())
+    ]
+    assert empty_events, "Expected pipeline_empty_data log record"
 
 
 def test_service_handles_api_errors():

@@ -266,3 +266,57 @@ class ParquetWriter:
         except Exception as e:
             logger.error("append_failed", output_file=str(output_file), error=str(e))
             raise
+
+    def write_part(self, df: pd.DataFrame, part_dir: Path, part_index: int) -> tuple[Optional[Path], Optional[int]]:
+        """Write a parquet part file into a specific directory.
+
+        This supports streaming flush and cached segment layouts.
+
+        Returns:
+            (output_file, file_size_bytes)
+        """
+        if df.empty:
+            logger.warning("write_empty_dataframe")
+            return None, None
+
+        part_dir = Path(part_dir)
+        try:
+            part_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(
+                "part_dir_create_failed",
+                part_dir=str(part_dir),
+                error=str(e),
+                exc_info=True,
+            )
+            raise
+
+        output_file = part_dir / f"part-{part_index:05d}.parquet"
+        try:
+            table = pa.Table.from_pandas(df)
+            pq.write_table(table, output_file, compression=self.config.parquet_compression)
+            file_size_bytes = output_file.stat().st_size if output_file.exists() else 0
+            logger.info(
+                "parquet_part_write_success",
+                output_file=str(output_file),
+                num_rows=len(df),
+                num_columns=len(df.columns),
+                file_size_bytes=file_size_bytes,
+            )
+            return output_file, int(file_size_bytes)
+        except Exception as e:
+            logger.error(
+                "parquet_part_write_failed",
+                output_file=str(output_file),
+                error=str(e),
+                exc_info=True,
+            )
+            raise
+
+    @staticmethod
+    def read_dataset(dataset_dir: Path) -> pd.DataFrame:
+        """Read a directory containing one or more parquet part files."""
+        dataset_dir = Path(dataset_dir)
+        table = pq.read_table(dataset_dir)
+        return table.to_pandas()
+
